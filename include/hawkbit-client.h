@@ -76,6 +76,19 @@ struct get_binary_checksum {
 /**
  * @brief struct containing
  */
+struct artifact_r1 {
+		gchar* status;
+
+		gchar* id;
+        gchar* sha256;
+        gint64 size;
+        gchar* name;
+        gchar* downloadUrl;
+        gchar* filetype;
+
+		gchar* version;
+		gboolean* forced_update;
+};
 struct artifact {
         gchar* name;                  /**< name of software */
         gchar* version;               /**< software version */

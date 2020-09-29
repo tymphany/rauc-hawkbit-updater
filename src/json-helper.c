@@ -55,6 +55,20 @@ gint64 json_get_int(JsonNode *json_node, const gchar *path)
         return res_int;
 }
 
+gboolean json_get_boolean(JsonNode *json_node, const gchar *path)
+{
+        gboolean res_boolean = -1;
+        JsonNode *result = json_path_query(path, json_node, NULL);
+        if (result) {
+                JsonArray *results = json_node_get_array(result);
+                if (json_array_get_length( results ) > 0) {
+                        res_boolean = json_array_get_boolean_element(results, 0);
+                }
+        }
+        json_node_unref(result);
+        return res_boolean;
+}
+
 JsonArray* json_get_array(JsonNode *json_node, const gchar *path)
 {
         JsonArray *res_arr = NULL;
