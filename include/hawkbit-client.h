@@ -29,7 +29,7 @@ struct config;
 
 #define HAWKBIT_USERAGENT                 "rauc-hawkbit-c-agent/1.0"
 #define DEFAULT_CURL_REQUEST_BUFFER_SIZE  512
-#define DEFAULT_SLEEP_TIME_SEC            60 * 60   // 1 hour
+#define DEFAULT_SLEEP_TIME_SEC            60 * 60 * 24   // 1 day
 #define DEFAULT_CURL_DOWNLOAD_BUFFER_SIZE 64 * 1024 // 64KB
 
 extern gboolean volatile force_check_run;  /**< force software check */
@@ -63,6 +63,7 @@ struct get_binary {
         gint64 filesize;              /**< expected file size of download file */
         gint64 written;               /**< number of bytes written to download file */
         GChecksum *checksum;          /**< checksum of download file */
+		gchar* status;
 };
 
 /**
@@ -76,27 +77,22 @@ struct get_binary_checksum {
 /**
  * @brief struct containing
  */
-struct artifact_r1 {
+struct artifact {
+		gchar* response_id;
+		gchar* state;
 		gchar* status;
+		gchar* action;
 
-		gchar* id;
+		gchar* artifact_id;
         gchar* sha256;
         gint64 size;
         gchar* name;
         gchar* downloadUrl;
         gchar* filetype;
+		gchar* signedDigest;
 
 		gchar* version;
-		gboolean* forced_update;
-};
-struct artifact {
-        gchar* name;                  /**< name of software */
-        gchar* version;               /**< software version */
-        gint64 size;                  /**< size of software bundle file */
-        gchar* download_url;          /**< download URL of software bundle file */
-        gchar* feedback_url;          /**< URL status feedback should be sent to */
-        gchar* sha1;                  /**< sha1 checksum of software bundle file */
-        gchar* md5;                   /**< md5 checksum of software bundle file */
+		//gboolean* forced_update;
 };
 
 /**
