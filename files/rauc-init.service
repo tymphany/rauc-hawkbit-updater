@@ -1,0 +1,11 @@
+[Unit]
+Description=Rauc Init Script
+#Requires=.service
+#After=.service
+
+[Service]
+Type=oneshot
+ExecStart=/etc/initscripts/rauc-init.sh
+
+[Install]
+WantedBy=multi-user.target
