@@ -5,6 +5,8 @@ option(WITH_SYSTEMD "Set to ON to create unit files and enable systemd startup" 
 option(BUILD_DOC    "Build documentation" OFF)
 option(QA_BUILD     "QA build (pedantic, with fatal errors)" OFF)
 
+set(WITH_SYSTEMD OFF)
+
 if (WITH_SYSTEMD)
 	add_definitions( -DWITH_SYSTEMD )
 endif (WITH_SYSTEMD)
