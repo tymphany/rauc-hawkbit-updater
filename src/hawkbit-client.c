@@ -55,8 +55,16 @@
 
 #include "hawkbit-client.h"
 
+#define FILE_DOWNLOAD_CHECKPOINTS_NUM         (10)
+#define FILE_DOWNLOAD_DONE_ALL_IN_ALL_PERCENT (75)
+#define FILE_DOWNLOAD_CHECKPOINTS_PERCENT_STEP           (100 / FILE_DOWNLOAD_CHECKPOINTS_NUM)
+#define FILE_DOWNLOAD_ALL_IN_ALL_PERCENT_PER_CHECKPOINT (FILE_DOWNLOAD_DONE_ALL_IN_ALL_PERCENT / FILE_DOWNLOAD_CHECKPOINTS_NUM)
+
 gboolean volatile force_check_run = FALSE;
+gboolean volatile force_exit = FALSE;
+
 gboolean run_once = FALSE;
+gchar   currentVersion[7] = "0.0.0";
 
 /**
  * @brief String representation of HTTP methods.
@@ -77,9 +85,85 @@ static const char *pCACertFile = "3rdparty_infra_cert_chain.pem";
 
 static const char *pKeyName = "client.key";
 static const char *pKeyType = "PEM";
-static gboolean states[10] = {FALSE};
+
+static gboolean checkPoints[FILE_DOWNLOAD_CHECKPOINTS_NUM] = {FALSE};
 
 static gboolean feedback_progress(const gchar *url, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, GError **error, gboolean final, const gchar *finalResult);
+
+static void update_current_version()
+{
+	FILE *f = fopen("/etc/sw-version.conf", "rb");
+	fseek(f, 0, SEEK_END);
+	long fsize = ftell(f);
+	fseek(f, 0, SEEK_SET);
+
+	char *string = malloc(fsize + 1);
+	fread(string, 1, fsize, f);
+	fclose(f);
+
+	string[fsize] = 0;
+
+	g_debug("Current version %s", string);
+
+	//return G_SOURCE_CONTINUE;
+
+	sprintf(currentVersion, "%s", string);
+}
+
+static gboolean check_if_inprogress()
+{
+	if( access("/etc/rauc-hawkbit-updater/inprogress", 0 ) == 0 ) {
+
+		g_message("Update is in progress, maybe need to report some states");
+
+		FILE * fp;
+		char * version = NULL;
+		char * statusUrl = NULL;
+		size_t len = 0;
+		ssize_t read;
+
+		fp = fopen("/etc/rauc-hawkbit-updater/inprogress", "r");
+		if (fp == NULL){
+			g_critical("Cannot open inprogress file even though it exists");
+			exit(EXIT_FAILURE);
+		}
+
+		if ((read = getline(&version, &len, fp)) != -1) {
+			//printf("Retrieved line of length %zu:\n", read);
+			g_debug("Current SW version: %sInprogress SW version: %s", currentVersion, version);
+
+			if (0 == strcmp(version, currentVersion)){
+				g_debug("Update has been finilized, we report to server that it is done");
+
+				if ((read = getline(&statusUrl, &len, fp)) != -1) {
+								//printf("Retrieved line of length %zu:\n", read);
+								g_debug("statusUrl: %s", statusUrl);
+				}
+				else {
+					g_debug("Cannot read statusUrls");
+				}
+
+				feedback_progress(statusUrl, "SUCCESS",   100, "", "", "", "", NULL, TRUE, "SUCCESS");
+				remove("/etc/rauc-hawkbit-updater/inprogress");
+			}
+			else {
+				g_debug("Update has not been finilized, maybe need to reboot as a last step, maybe something went wrong");
+			}
+		}
+		else {
+			g_critical("Cannot read expected inprogress sw version");
+			exit(EXIT_FAILURE);
+		}
+		fclose(fp);
+
+		return TRUE;
+	}
+	else {
+		g_critical("No update in progress, proceed to polling");
+		return FALSE;
+	}
+
+}
 
 /**
  * @brief Get available free space
@@ -114,9 +198,9 @@ static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct
 		//g_debug("curl_write_to_file_cb: size:%d, nmemb:%d\n", size, nmemb);
 
         size_t written = fwrite(ptr, size, nmemb, data->fp);
-		
+
         double percentage;
-		
+
         data->written += written;
         if (data->checksum) {
                 g_checksum_update(data->checksum, ptr, written);
@@ -128,13 +212,18 @@ static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct
 
 		for (int ii = 9; ii >= 0; ii--)
 		{
-			if (!states[ii] && (percentage > (ii+1)*10))
+			if (!checkPoints[ii] && (percentage > (ii+1) * FILE_DOWNLOAD_CHECKPOINTS_PERCENT_STEP))
 			{
-				states[ii] = TRUE;
-				feedback_progress(data->status, "DOWNLOADING", (ii+1)*10, "Main info", "We have downloaed another 10%", "Something must be mentioned", "But so slow", NULL, FALSE, "");	
+				checkPoints[ii] = TRUE;
+
+				char buf[100];
+				sprintf(buf, "Bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
+
+				// The downloading is done is 80% of all in all progress
+				feedback_progress(data->status, "DOWNLOADING", (ii + 1) * (FILE_DOWNLOAD_ALL_IN_ALL_PERCENT_PER_CHECKPOINT), "Main info", buf, "", "", NULL, FALSE, "");
 				break;
 			}
-		}		
+		}
 
         return written;
 }
@@ -234,7 +323,7 @@ static size_t curl_write_cb(void *content, size_t size, size_t nmemb, void *data
 
         p->payload = (gchar *) g_realloc(p->payload, p->size + real_size + 1);
         if (p->payload == NULL) {
-                g_debug("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Failed to expand buffer");
+                g_critical("Failed to expand buffer");
                 return -1;
         }
 
@@ -245,7 +334,6 @@ static size_t curl_write_cb(void *content, size_t size, size_t nmemb, void *data
 
         return real_size;
 }
-
 
 /**
  * @brief Make REST request.
@@ -277,10 +365,6 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
         }
         fetch_buffer.size = 0;
 
-		struct curl_slist *list = NULL;
-
-		list = curl_slist_append(list, "ota-current-version:2.2.2");
-
 		// setup CURL options
 		curl_easy_setopt(curl, CURLOPT_URL, url);
 		//curl_easy_setopt(curl, CURLOPT_USERAGENT, HAWKBIT_USERAGENT);
@@ -290,20 +374,20 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void*) &fetch_buffer);
 		//curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
-		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+		curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
 
-		/* set the file with the certs vaildating the server */ 
+		/* set the file with the certs vaildating the server */
 		curl_easy_setopt(curl, CURLOPT_CAINFO, pCACertFile);
 
-		/* set the cert for client authentication */ 
+		/* set the cert for client authentication */
 		curl_easy_setopt(curl, CURLOPT_SSLCERT, pCertFile);
 
 
 		/* if we use a key stored in a crypto engine,
-		we must set the key type to "ENG" */ 
+		we must set the key type to "ENG" */
 		curl_easy_setopt(curl, CURLOPT_SSLKEYTYPE, pKeyType);
 
-		/* set the private key (file or ID in engine) */ 
+		/* set the private key (file or ID in engine) */
 		curl_easy_setopt(curl, CURLOPT_SSLKEY, pKeyName);
 
 		curl_easy_setopt(curl, CURLOPT_USERAGENT, "curl/7.61.0");
@@ -325,7 +409,10 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
 
 		if (!progressReport)
 		{
-			headers = curl_slist_append(headers, "ota-current-version:0.1.0");
+			char buf[100];
+			sprintf(buf, "ota-current-version:%s", currentVersion);
+			//headers = curl_slist_append(headers, "ota-current-version:2.2.2");
+			headers = curl_slist_append(headers, buf);
 		}
 		else
 		{
@@ -340,7 +427,7 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
 		//g_debug("res[%d] http_code: %ld  fetch_buffer.size[%d]\n", res, http_code, fetch_buffer.size);
-		
+
         if (res == CURLE_OK && http_code == 200) {
                 if (jsonResponseParser && fetch_buffer.size > 0) {
                         JsonParser *parser = json_parser_new_immutable();
@@ -395,29 +482,32 @@ static void json_build_status(JsonBuilder *builder, const gchar *state, gint pro
 
         // build json status
         json_builder_begin_object(builder);
-			json_builder_set_member_name(builder, "states");		
-			json_builder_begin_array(builder);		
-				json_builder_begin_object(builder); 
+			json_builder_set_member_name(builder, "states");
+			json_builder_begin_array(builder);
+				json_builder_begin_object(builder);
 			        json_builder_set_member_name(builder, "state");
 			        json_builder_add_string_value(builder, state);
 			        json_builder_set_member_name(builder, "timestamp");
 			        json_builder_add_int_value(builder, current_time);
 			        json_builder_set_member_name(builder, "progress");
 			        json_builder_add_int_value(builder, progress);
-					if (final)
-					{
+					if (final) {
 						json_builder_set_member_name(builder, "final");
-			        	json_builder_add_string_value(builder, finalResult);				
+			        	json_builder_add_string_value(builder, finalResult);
 					}
 					json_builder_set_member_name(builder, "details");
-					json_builder_begin_object(builder);		
-				        json_builder_set_member_name(builder,  value1_name);
-				        json_builder_add_string_value(builder, value1);
-				        json_builder_set_member_name(builder,  value2_name);
-				        json_builder_add_string_value(builder, value2);
+					json_builder_begin_object(builder);
+						if (0 != strcmp(value1_name,"")) {
+					        json_builder_set_member_name(builder,  value1_name);
+					        json_builder_add_string_value(builder, value1);
+						}
+						if (0 != strcmp(value2_name,"")) {
+					        json_builder_set_member_name(builder,  value2_name);
+					        json_builder_add_string_value(builder, value2);
+						}
 					json_builder_end_object(builder);
 				json_builder_end_object(builder);
-			
+
 			json_builder_end_array(builder);
 		json_builder_end_object(builder);
 }
@@ -428,7 +518,7 @@ static void json_build_status(JsonBuilder *builder, const gchar *state, gint pro
 static gboolean feedback_progress(const gchar *url, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, GError **error, gboolean final, const gchar *finalResult)
 {
         JsonBuilder *builder = json_builder_new();
-		
+
         json_build_status(builder, state, progress, value1_name, value1, value2_name, value2, final, finalResult);
 
         int status = rest_request(PUT, url, builder, NULL, error, TRUE);
@@ -456,7 +546,7 @@ static long json_get_version(JsonNode *root)
                 v3 = atoi(temp);
 
             //    g_debug("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: %d.%d.%d", v1, v2, v3);
-                
+
                 return v1*10000+v2*100+v3;
         }
         return 0;
@@ -528,7 +618,7 @@ static void process_artifact_cleanup(struct artifact *artifact)
 
         g_free(artifact->artifact_id);
         g_free(artifact->sha256);
-		g_free(artifact->size);
+		//g_free(artifact->size);
 		g_free(artifact->name);
 		g_free(artifact->downloadUrl);
 		g_free(artifact->filetype);
@@ -593,9 +683,9 @@ static gpointer download_thread(gpointer data)
 
         g_message("%s", msg);
 
-		feedback_progress(artifact->status, "DOWNLOADED", 100, "Conclusion", "Finally we have finished", "Something just have to be said", "The download speed through linux box as AP is horrible. However downloading on AP Linux box itself is significantly better.", NULL, FALSE, "");
+		feedback_progress(artifact->status, "DOWNLOADED", 75, "Conclusion", "Finally we have finished", "Something just have to be said", "The download speed through linux box as AP is horrible. However downloading on AP Linux box itself is significantly better.", NULL, FALSE, "");
 
-		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 100, "", "", "", "", NULL, FALSE, "");
+		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 80, "", "", "", "", NULL, FALSE, "");
 
         // validate checksum
         if (g_strcmp0(artifact->sha256, checksum.checksum_result)) {
@@ -612,15 +702,17 @@ static gpointer download_thread(gpointer data)
 
         g_message("File checksum OK");
 
-		feedback_progress(artifact->status, "PREPARING", 100, "", "", "", "", NULL, FALSE, "");
-		feedback_progress(artifact->status, "SCHEDULED", 100, "", "", "", "", NULL, FALSE, "");
-		feedback_progress(artifact->status, "EXECUTING", 100, "", "", "", "", NULL, FALSE, "");
-		feedback_progress(artifact->status, "INSTALLING",100, "", "", "", "", NULL, FALSE, "");
-		feedback_progress(artifact->status, "SUCCESS",   100, "", "", "", "", NULL, TRUE, "SUCCESS");
+		feedback_progress(artifact->status, "PREPARING", 85, "", "", "", "", NULL, FALSE, "");
+		feedback_progress(artifact->status, "SCHEDULED", 85, "", "", "", "", NULL, FALSE, "");
+		//feedback_progress(artifact->status, "EXECUTING", 90, "", "", "", "", NULL, FALSE, "");
+		//feedback_progress(artifact->status, "INSTALLING",95, "", "", "", "", NULL, FALSE, "");
+		//feedback_progress(artifact->status, "SUCCESS",   100, "", "", "", "", NULL, TRUE, "SUCCESS");
 
-		g_critical("!!!!!!!!![%s]", artifact->signedDigest);
+		g_debug("Signature[%s]", artifact->signedDigest);
 
 		char buf[300];
+
+#ifdef VERIFY_SIGNATURE
 		sprintf(buf, "echo %s > signed_digest_base64", artifact->signedDigest);
 		system(buf);
 		memset(buf, 0, sizeof (buf));
@@ -628,17 +720,24 @@ static gpointer download_thread(gpointer data)
 		sprintf(buf, "cat signed_digest_base64 | base64 -d > singed_digest", artifact->signedDigest);
 		system(buf);
 		memset(buf, 0, sizeof (buf));
-		
+
 		sprintf(buf, "openssl dgst -verify code_signing.pem -signature signed_digest meow.raucb > result", artifact->signedDigest);
 		system(buf);
 		memset(buf, 0, sizeof (buf));
-		
-        //return NULL;
-        //feedback_progress(artifact->status, action_id, 2, "File checksum OK.", NULL);
+#endif
+
+		//sprintf(buf, "touch /etc/rauc-hawkbit-updater/inprogress");
+		sprintf(buf, "echo \"%s\n%s\" > /etc/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
+		system(buf);
+		memset(buf, 0, sizeof (buf));
+
         g_free(checksum.checksum_result);
         process_artifact_cleanup(artifact);
+/*
+        //software_ready_cb(&userdata);
+*/
+		force_exit = TRUE;
 
-        software_ready_cb(&userdata);
         return NULL;
 down_error:
         g_free(checksum.checksum_result);
@@ -652,7 +751,7 @@ static gboolean process_deployment(JsonNode *req_root, GError **error)
 {
         GError *ierror = NULL;
         struct artifact *artifact = NULL;
-		
+
 		JsonArray *json_artifacts = json_get_array(req_root, "$.artifacts");
 
         JsonNode *json_artifact = json_array_get_element(json_artifacts, 0);
@@ -664,14 +763,14 @@ static gboolean process_deployment(JsonNode *req_root, GError **error)
 		artifact->state         = json_get_string(req_root, "$.state");
 		artifact->status        = json_get_string(req_root, "$.status");
 		artifact->action        = json_get_string(req_root, "$.action");
-		
+
         artifact->artifact_id   = json_get_string(json_artifact, "$.id");
         artifact->sha256        = json_get_string(json_artifact, "$.sha256");
         artifact->size          = json_get_int   (json_artifact, "$.size");
         artifact->name          = json_get_string(json_artifact, "$.name");
         artifact->downloadUrl   = json_get_string(json_artifact, "$.downloadUrl");
         artifact->filetype      = json_get_string(json_artifact, "$.filetype");
-		artifact->signedDigest  = json_get_string(json_artifact, "$.signedDigest"); 
+		artifact->signedDigest  = json_get_string(json_artifact, "$.signedDigest");
 
 		artifact->version       = json_get_string (req_root,  "$.metadata.version");
 
@@ -708,7 +807,7 @@ static gboolean process_deployment(JsonNode *req_root, GError **error)
         // start download thread
 
 		feedback_progress(artifact->status, "NOT_STARTED", 0, "Main things to say", "We see new sw to download", "Our hopes", "We hope it will go smoothly", NULL, FALSE, "");
-		
+
         g_thread_new("downloader", download_thread, (gpointer) artifact);
         return TRUE;
 
@@ -737,6 +836,12 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
         //g_debug("#####88");
         ClientData *data = user_data;
 
+		if (force_exit){
+            data->res = 0;
+            g_main_loop_quit(data->loop);
+            return G_SOURCE_REMOVE;
+        }
+
         if (!force_check_run && ++last_run_sec < sleep_time)
                 return G_SOURCE_CONTINUE;
 
@@ -749,11 +854,22 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
         GError *error = NULL;
         JsonParser *json_response_parser = NULL;
 
-        g_message("Checking for new software...get_tasks_url[%s]",get_tasks_url);
+//		g_message("Checking for new software...get_tasks_url[%s]",get_tasks_url);
 
 	//	g_autofree gchar get_tasks_url_new[200];
 	//	strcpy(get_tasks_url_new, "-v --cacert 3rdparty_infra_cert_chain.pem --cert client.crt --key client.key  https://172.16.69.103/v1/campaigns/speaker/deployment");
 	//	g_message("Checking for new software...get_tasks_url[%s]",get_tasks_url_new);
+
+		update_current_version();
+
+		if (TRUE == check_if_inprogress()){
+			data->res = 0;
+			g_main_loop_quit(data->loop);
+			return G_SOURCE_REMOVE;
+		}
+
+		//g_critical("!!!!!!!!!!!!!currentVersion %s", currentVersion);
+
 
 		int status = rest_request(GET, get_tasks_url, NULL, &json_response_parser, &error, FALSE);
 
@@ -840,13 +956,13 @@ int hawkbit_start_service_sync()
 
         g_debug("#####5");
 
-        timeout_source = g_timeout_source_new(5000);   // pull every second
+        timeout_source = g_timeout_source_new(1000);   // pull every second
         g_source_set_name(timeout_source, "Add timeout");
         g_source_set_callback(timeout_source, (GSourceFunc) hawkbit_pull_cb, &cdata, NULL);
         g_source_attach(timeout_source, ctx);
         g_source_unref(timeout_source);
 
-        g_debug("#####6");
+        g_debug("#####6[");
 
 #ifdef WITH_SYSTEMD
 
