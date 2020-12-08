@@ -88,7 +88,7 @@ static const char *pKeyType = "PEM";
 
 static gboolean checkPoints[FILE_DOWNLOAD_CHECKPOINTS_NUM] = {FALSE};
 
-static gboolean feedback_progress(const gchar *url, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, GError **error, gboolean final, const gchar *finalResult);
+static gboolean feedback_progress(const gchar *url, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, GError **error, const gchar *finalResult);
 
 static void update_current_version()
 {
@@ -108,6 +108,22 @@ static void update_current_version()
 	//return G_SOURCE_CONTINUE;
 
 	sprintf(currentVersion, "%s", string);
+}
+
+static gboolean get_signature_check_result()
+{
+	FILE *f = fopen("/etc/rauc-hawkbit-updater/result", "rb");
+	fseek(f, 0, SEEK_END);
+	long fsize = ftell(f);
+	fseek(f, 0, SEEK_SET);
+
+	char *string = malloc(fsize + 1);
+	fread(string, 1, fsize, f);
+	fclose(f);
+
+	string[fsize] = 0;
+
+	return (0 == strncmp(string, "Verified OK", strlen("Verified OK")));
 }
 
 static gboolean check_if_inprogress()
@@ -130,10 +146,10 @@ static gboolean check_if_inprogress()
 
 		if ((read = getline(&version, &len, fp)) != -1) {
 			//printf("Retrieved line of length %zu:\n", read);
-			g_debug("Current SW version: %sInprogress SW version: %s", currentVersion, version);
+			g_debug("   Current SW version: %s       Inprogress SW version: %s", currentVersion, version);
 
 			if (0 == strcmp(version, currentVersion)){
-				g_debug("Update has been finilized, we report to server that it is done");
+				g_debug("Update has been finalized, we report to server that it is done");
 
 				if ((read = getline(&statusUrl, &len, fp)) != -1) {
 								//printf("Retrieved line of length %zu:\n", read);
@@ -143,7 +159,7 @@ static gboolean check_if_inprogress()
 					g_debug("Cannot read statusUrls");
 				}
 
-				feedback_progress(statusUrl, "SUCCESS",   100, "", "", "", "", NULL, TRUE, "SUCCESS");
+				feedback_progress(statusUrl, "SUCCESS",   100, "", "", "", "", NULL, "SUCCESS");
 				remove("/etc/rauc-hawkbit-updater/inprogress");
 			}
 			else {
@@ -162,7 +178,6 @@ static gboolean check_if_inprogress()
 		g_critical("No update in progress, proceed to polling");
 		return FALSE;
 	}
-
 }
 
 /**
@@ -197,6 +212,8 @@ static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct
 {
 		//g_debug("curl_write_to_file_cb: size:%d, nmemb:%d\n", size, nmemb);
 
+		GError *error = NULL;
+
         size_t written = fwrite(ptr, size, nmemb, data->fp);
 
         double percentage;
@@ -216,11 +233,13 @@ static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct
 			{
 				checkPoints[ii] = TRUE;
 
-				char buf[100];
-				sprintf(buf, "Bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
+				//char buf[100];
+				//sprintf(buf, "Bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
+
+				g_autofree gchar *msg = g_strdup_printf("Bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
 
 				// The downloading is done is 80% of all in all progress
-				feedback_progress(data->status, "DOWNLOADING", (ii + 1) * (FILE_DOWNLOAD_ALL_IN_ALL_PERCENT_PER_CHECKPOINT), "Main info", buf, "", "", NULL, FALSE, "");
+				feedback_progress(data->status, "DOWNLOADING", (ii + 1) * (FILE_DOWNLOAD_ALL_IN_ALL_PERCENT_PER_CHECKPOINT), "Download details", msg, "", "", error, "");
 				break;
 			}
 		}
@@ -467,7 +486,7 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
  * @brief Build JSON status request.
  * @see https://www.eclipse.org/hawkbit/rest-api/rootcontroller-api-guide/#_post_tenant_controller_v1_controllerid_deploymentbase_actionid_feedback
  */
-static void json_build_status(JsonBuilder *builder, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, gboolean final, const gchar *finalResult)
+static void json_build_status(JsonBuilder *builder, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, const gchar *finalResult)
 {
         GHashTableIter iter;
         gpointer key, value;
@@ -491,7 +510,7 @@ static void json_build_status(JsonBuilder *builder, const gchar *state, gint pro
 			        json_builder_add_int_value(builder, current_time);
 			        json_builder_set_member_name(builder, "progress");
 			        json_builder_add_int_value(builder, progress);
-					if (final) {
+					if (0 != strcmp(finalResult,"")) {
 						json_builder_set_member_name(builder, "final");
 			        	json_builder_add_string_value(builder, finalResult);
 					}
@@ -515,11 +534,11 @@ static void json_build_status(JsonBuilder *builder, const gchar *state, gint pro
 /**
  * @brief Send progress feedback to hawkBit.
  */
-static gboolean feedback_progress(const gchar *url, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, GError **error, gboolean final, const gchar *finalResult)
+static gboolean feedback_progress(const gchar *url, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, GError **error, const gchar *finalResult)
 {
         JsonBuilder *builder = json_builder_new();
 
-        json_build_status(builder, state, progress, value1_name, value1, value2_name, value2, final, finalResult);
+        json_build_status(builder, state, progress, value1_name, value1, value2_name, value2, finalResult);
 
         int status = rest_request(PUT, url, builder, NULL, error, TRUE);
         //g_debug("feedback_progress: %d, URL: %s", status, url);
@@ -641,8 +660,6 @@ static void process_deployment_cleanup()
         }
 }
 
-
-
 static gpointer download_thread(gpointer data)
 {
         struct on_new_software_userdata userdata = {
@@ -658,7 +675,7 @@ static gpointer download_thread(gpointer data)
         // setup checksum
         struct get_binary_checksum checksum = { .checksum_result = NULL, .checksum_type = G_CHECKSUM_SHA256 };
 
-        feedback_progress(artifact->status, "DOWNLOADING", 2, "Main things to say", "We have started downloading, hopefully speed will be acceptable", "Our hopes", "We hope the speed will be ok, but deep inside we already know what will happen", NULL, FALSE, "");
+        feedback_progress(artifact->status, "DOWNLOADING", 2, "Info", "About to statr downloading", "", "", error, "");
 
         // Download software bundle (artifact)
         gint64 start_time = g_get_monotonic_time();
@@ -671,7 +688,7 @@ static gpointer download_thread(gpointer data)
                 g_autofree gchar *msg = g_strdup_printf("Download failed: %s Status: %d", error->message, status);
                 g_clear_error(&error);
                 g_critical("%s", msg);
-                //feedback(artifact->status, action_id, msg, "failure", "closed", NULL);
+                feedback_progress(artifact->status, "SILENT_FAILURE", 6, "Failure details", msg, "", "", error, "");
                 goto down_error;
         }
 
@@ -683,9 +700,9 @@ static gpointer download_thread(gpointer data)
 
         g_message("%s", msg);
 
-		feedback_progress(artifact->status, "DOWNLOADED", 75, "Conclusion", "Finally we have finished", "Something just have to be said", "The download speed through linux box as AP is horrible. However downloading on AP Linux box itself is significantly better.", NULL, FALSE, "");
+		feedback_progress(artifact->status, "DOWNLOADED", 75, "Details", "File was fully downloaded", "", "", error, "");
 
-		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 80, "", "", "", "", NULL, FALSE, "");
+		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 80, "Details", "Starting file validating procedure", "", "", error, "");
 
         // validate checksum
         if (g_strcmp0(artifact->sha256, checksum.checksum_result)) {
@@ -694,7 +711,8 @@ static gpointer download_thread(gpointer data)
                         artifact->name, artifact->version,
                         checksum.checksum_result,
                         artifact->sha256);
-                //feedback(artifact->status, action_id, msg, "failure", "closed", NULL);
+
+                feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "", "", error, "");
                 g_critical("%s", msg);
                 status = -3;
                 goto down_error;
@@ -702,34 +720,49 @@ static gpointer download_thread(gpointer data)
 
         g_message("File checksum OK");
 
-		feedback_progress(artifact->status, "PREPARING", 85, "", "", "", "", NULL, FALSE, "");
-		feedback_progress(artifact->status, "SCHEDULED", 85, "", "", "", "", NULL, FALSE, "");
+		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", "Checksum check passed", "", "", error, "");
+
+		g_debug("Signature[%s]", artifact->signedDigest);
+
+		g_autofree gchar *buf;
+
+		buf = g_strdup_printf("echo %s > signed_digest_base64", artifact->signedDigest);
+		//sprintf(buf, "echo %s > signed_digest_base64", artifact->signedDigest);
+		system(buf);
+
+		buf = g_strdup_printf("cat signed_digest_base64 | base64 -d > signed_digest", artifact->signedDigest);
+		//sprintf(buf, "cat signed_digest_base64 | base64 -d > singed_digest", artifact->signedDigest);
+		system(buf);
+
+		buf = g_strdup_printf("openssl dgst -verify code_signing.pem -signature signed_digest meow.raucb > /etc/rauc-hawkbit-updater/result", artifact->signedDigest);
+		//sprintf(buf, "openssl dgst -verify code_signing.pem -signature signed_digest meow.raucb > result", artifact->signedDigest);
+		system(buf);
+
+		if (!get_signature_check_result()) {
+			g_debug("Digital signature check FAIL");
+			feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", "Digital signature verification failed", "", "", error, "");
+            g_critical("%s", msg);
+            status = -4;
+            goto down_error;
+		}
+
+		g_debug("Digital signature check SUCCESS");
+
+		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 84, "Details", "Digital signature verification passed", "", "", error, "");
+
+		feedback_progress(artifact->status, "PREPARING", 85, "", "", "", "", error, "");
+
+		feedback_progress(artifact->status, "SCHEDULED", 86, "", "", "", "", error, "");
+
 		//feedback_progress(artifact->status, "EXECUTING", 90, "", "", "", "", NULL, FALSE, "");
 		//feedback_progress(artifact->status, "INSTALLING",95, "", "", "", "", NULL, FALSE, "");
 		//feedback_progress(artifact->status, "SUCCESS",   100, "", "", "", "", NULL, TRUE, "SUCCESS");
 
-		g_debug("Signature[%s]", artifact->signedDigest);
-
-		char buf[300];
-
-#ifdef VERIFY_SIGNATURE
-		sprintf(buf, "echo %s > signed_digest_base64", artifact->signedDigest);
-		system(buf);
-		memset(buf, 0, sizeof (buf));
-
-		sprintf(buf, "cat signed_digest_base64 | base64 -d > singed_digest", artifact->signedDigest);
-		system(buf);
-		memset(buf, 0, sizeof (buf));
-
-		sprintf(buf, "openssl dgst -verify code_signing.pem -signature signed_digest meow.raucb > result", artifact->signedDigest);
-		system(buf);
-		memset(buf, 0, sizeof (buf));
-#endif
-
 		//sprintf(buf, "touch /etc/rauc-hawkbit-updater/inprogress");
-		sprintf(buf, "echo \"%s\n%s\" > /etc/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
+
+		buf = g_strdup_printf("echo \"%s\n%s\" > /etc/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
+		//sprintf(buf, "echo \"%s\n%s\" > /etc/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
 		system(buf);
-		memset(buf, 0, sizeof (buf));
 
         g_free(checksum.checksum_result);
         process_artifact_cleanup(artifact);
@@ -775,13 +808,19 @@ static gboolean process_deployment(JsonNode *req_root, GError **error)
 		artifact->version       = json_get_string (req_root,  "$.metadata.version");
 
         if (artifact->downloadUrl == NULL) {
-                //feedback(feedback_url, action_id, "Failed to parse deployment resource.", "failure", "closed", NULL);
+
                 g_set_error(error,1,22,"Failed to parse deployment resource.");
                 goto proc_error;
         }
 
-        g_message("New software ready for download. (Name: %s, Version: %s, Size: %" G_GINT64_FORMAT ", URL: %s)\n\r",
-                  artifact->name, artifact->version, artifact->size, artifact->downloadUrl);
+//        g_message("New software ready for download. (Name: %s, Version: %s, Size: %" G_GINT64_FORMAT ", URL: %s)\n\r", artifact->name, artifact->version, artifact->size, artifact->downloadUrl);
+//        g_autofree gchar *msg = g_strdup_printf("New software ready for download. (Name: %s, Version: %s, Size: %" G_GINT64_FORMAT ", URL: %s)", artifact->name, artifact->version, artifact->size, artifact->downloadUrl);
+		g_autofree gchar *msg = g_strdup_printf("New software ready for download. (Name: %s, Version: %s, Size: %d)", artifact->name, artifact->version, artifact->size);
+
+		g_message("%s", msg);
+//		g_message(msg);
+
+		feedback_progress(artifact->status, "NOT_STARTED", 0, "Info", msg, "Download URL", artifact->downloadUrl, ierror, "");
 
         // Check if there is enough free diskspace
         long freespace = get_available_space(hawkbit_config->bundle_download_location, &ierror);
@@ -789,24 +828,19 @@ static gboolean process_deployment(JsonNode *req_root, GError **error)
 		g_debug("[%s]: freespace available = %d", __FUNCTION__, freespace);
 
         if (freespace == -1) {
-              //  feedback(feedback_url, action_id, ierror->message, "failure", "closed", NULL);
                 g_propagate_error(error, ierror);
-              //  status = -4;
+				feedback_progress(artifact->status, "SILENT_FAILURE", 0, "Failure details", "Unable to egt free space available", "", "", ierror, "");
                 goto proc_error;
         } else if (freespace < artifact->size) {
-                g_autofree gchar *msg = g_strdup_printf("Not enough free space. File size: %" G_GINT64_FORMAT  ". Free space: %ld",
-                                                        artifact->size, freespace);
-                g_debug("%s", msg);
-                // Notify hawkbit that there is not enough free space.
-                //feedback(feedback_url, action_id, msg, "failure", "closed", NULL);
+                g_autofree gchar *msg = g_strdup_printf("Not enough free space. File size: %" G_GINT64_FORMAT  ". Free space: %ld", artifact->size, freespace);
+				g_propagate_error(error, ierror);
+				feedback_progress(artifact->status, "SILENT_FAILURE", 0, "Failure details", msg, "", "", NULL, "");
+				g_debug("%s", msg);
                 g_set_error(error, 1, 23, "%s", msg);
-             //   status = -4;
                 goto proc_error;
         }
 
-        // start download thread
-
-		feedback_progress(artifact->status, "NOT_STARTED", 0, "Main things to say", "We see new sw to download", "Our hopes", "We hope it will go smoothly", NULL, FALSE, "");
+		//feedback_progress(artifact->status, "NOT_STARTED", 0, "", "We see new sw to download", "Our hopes", "We hope it will go smoothly", ierror, FALSE, "");
 
         g_thread_new("downloader", download_thread, (gpointer) artifact);
         return TRUE;
@@ -863,13 +897,12 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 		update_current_version();
 
 		if (TRUE == check_if_inprogress()){
-			data->res = 0;
+			data->res = 13;
 			g_main_loop_quit(data->loop);
 			return G_SOURCE_REMOVE;
 		}
 
-		//g_critical("!!!!!!!!!!!!!currentVersion %s", currentVersion);
-
+		g_message("Checking for new software...get_tasks_url[%s]",get_tasks_url);
 
 		int status = rest_request(GET, get_tasks_url, NULL, &json_response_parser, &error, FALSE);
 
@@ -915,7 +948,7 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
                 }
 
                 if (error)
-                        g_critical("Error: %s", error->message);
+                        g_critical("process_deployment Error: %s", error->message);
 
                 // sleep as long as specified by hawkbit
                 sleep_time = hawkbit_interval_check_sec;
@@ -962,7 +995,7 @@ int hawkbit_start_service_sync()
         g_source_attach(timeout_source, ctx);
         g_source_unref(timeout_source);
 
-        g_debug("#####6[");
+        g_debug("#####6");
 
 #ifdef WITH_SYSTEMD
 
