@@ -112,7 +112,7 @@ static void update_current_version()
 
 static gboolean get_signature_check_result()
 {
-	FILE *f = fopen("/etc/rauc-hawkbit-updater/result", "rb");
+	FILE *f = fopen("/etc/rauc-hawkbit-updater/sig_check_result", "rb");
 	fseek(f, 0, SEEK_END);
 	long fsize = ftell(f);
 	fseek(f, 0, SEEK_SET);
@@ -126,9 +126,25 @@ static gboolean get_signature_check_result()
 	return (0 == strncmp(string, "Verified OK", strlen("Verified OK")));
 }
 
+static gboolean get_recovery_result()
+{
+	FILE *f = fopen("/etc/rauc-hawkbit-updater/recovery_result", "rb");
+	fseek(f, 0, SEEK_END);
+	long fsize = ftell(f);
+	fseek(f, 0, SEEK_SET);
+
+	char *string = malloc(fsize + 1);
+	fread(string, 1, fsize, f);
+	fclose(f);
+
+	string[fsize] = 0;
+
+	return (0 == strncmp(string, "OTA success", strlen("OTA success")));
+}
+
 static gboolean check_if_inprogress()
 {
-	if( access("/etc/rauc-hawkbit-updater/inprogress", 0 ) == 0 ) {
+	if( access("/persist/factory/rauc-hawkbit-updater/inprogress", 0 ) == 0 ) {
 
 		g_message("Update is in progress, maybe need to report some states");
 
@@ -138,7 +154,7 @@ static gboolean check_if_inprogress()
 		size_t len = 0;
 		ssize_t read;
 
-		fp = fopen("/etc/rauc-hawkbit-updater/inprogress", "r");
+		fp = fopen("/persist/factory/rauc-hawkbit-updater/inprogress", "r");
 		if (fp == NULL){
 			g_critical("Cannot open inprogress file even though it exists");
 			exit(EXIT_FAILURE);
@@ -146,24 +162,27 @@ static gboolean check_if_inprogress()
 
 		if ((read = getline(&version, &len, fp)) != -1) {
 			//printf("Retrieved line of length %zu:\n", read);
-			g_debug("   Current SW version: %s       Inprogress SW version: %s", currentVersion, version);
+			g_debug("Current SW version: %s       Inprogress SW version: %s", currentVersion, version);
 
 			if (0 == strcmp(version, currentVersion)){
 				g_debug("Update has been finalized, we report to server that it is done");
 
 				if ((read = getline(&statusUrl, &len, fp)) != -1) {
 								//printf("Retrieved line of length %zu:\n", read);
-								g_debug("statusUrl: %s", statusUrl);
+
+								statusUrl[strlen(statusUrl)-1] = '\0';
 				}
 				else {
 					g_debug("Cannot read statusUrls");
 				}
 
+//https://172.16.69.103/v1/deployments/6eb0d890-f594-4752-92a8-1115dc00a678/states
+
 				feedback_progress(statusUrl, "SUCCESS",   100, "", "", "", "", NULL, "SUCCESS");
-				remove("/etc/rauc-hawkbit-updater/inprogress");
+				remove("/persist/factory/rauc-hawkbit-updater/inprogress");
 			}
 			else {
-				g_debug("Update has not been finilized, maybe need to reboot as a last step, maybe something went wrong");
+				g_debug("Update has not been finilized, pending for to reboot as a last step");
 			}
 		}
 		else {
@@ -393,7 +412,7 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void*) &fetch_buffer);
 		//curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
-		curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
+		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
 		/* set the file with the certs vaildating the server */
 		curl_easy_setopt(curl, CURLOPT_CAINFO, pCACertFile);
@@ -675,7 +694,7 @@ static gpointer download_thread(gpointer data)
         // setup checksum
         struct get_binary_checksum checksum = { .checksum_result = NULL, .checksum_type = G_CHECKSUM_SHA256 };
 
-        feedback_progress(artifact->status, "DOWNLOADING", 2, "Info", "About to statr downloading", "", "", error, "");
+        feedback_progress(artifact->status, "DOWNLOADING", 2, "Info", "About to start downloading", "", "", error, "");
 
         // Download software bundle (artifact)
         gint64 start_time = g_get_monotonic_time();
@@ -734,8 +753,8 @@ static gpointer download_thread(gpointer data)
 		//sprintf(buf, "cat signed_digest_base64 | base64 -d > singed_digest", artifact->signedDigest);
 		system(buf);
 
-		buf = g_strdup_printf("openssl dgst -verify code_signing.pem -signature signed_digest meow.raucb > /etc/rauc-hawkbit-updater/result", artifact->signedDigest);
-		//sprintf(buf, "openssl dgst -verify code_signing.pem -signature signed_digest meow.raucb > result", artifact->signedDigest);
+		buf = g_strdup_printf("openssl dgst -verify code_signing.pem -signature signed_digest /data/ota.raucb > /etc/rauc-hawkbit-updater/sig_check_result", artifact->signedDigest);
+		//sprintf(buf, "openssl dgst -verify code_signing.pem -signature signed_digest ota.raucb > result", artifact->signedDigest);
 		system(buf);
 
 		if (!get_signature_check_result()) {
@@ -750,9 +769,22 @@ static gpointer download_thread(gpointer data)
 
 		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 84, "Details", "Digital signature verification passed", "", "", error, "");
 
-		feedback_progress(artifact->status, "PREPARING", 85, "", "", "", "", error, "");
+		feedback_progress(artifact->status, "INSTALLING",85, "Details", "Memory bank flashing start", "", "", error, "");
 
-		feedback_progress(artifact->status, "SCHEDULED", 86, "", "", "", "", error, "");
+		buf = g_strdup_printf("/etc/factory-test/r1/updateOTA.sh ota.raucb > /etc/rauc-hawkbit-updater/recovery_result ", artifact->signedDigest);
+		system(buf);
+
+		if (!get_recovery_result()) {
+			g_debug("Flashig memory bank FAIL");
+			feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", "Flashing memory bank failed", "", "", error, "");
+            g_critical("%s", msg);
+            status = -4;
+            goto down_error;
+		}
+
+		feedback_progress(artifact->status, "INSTALLING",86, "Details", "Memory bank flashing done", "", "", error, "");
+
+		feedback_progress(artifact->status, "PENDING_REBOOT", 87, "Details", "Now we wait for system reboot", "", "", error, "");
 
 		//feedback_progress(artifact->status, "EXECUTING", 90, "", "", "", "", NULL, FALSE, "");
 		//feedback_progress(artifact->status, "INSTALLING",95, "", "", "", "", NULL, FALSE, "");
@@ -760,7 +792,7 @@ static gpointer download_thread(gpointer data)
 
 		//sprintf(buf, "touch /etc/rauc-hawkbit-updater/inprogress");
 
-		buf = g_strdup_printf("echo \"%s\n%s\" > /etc/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
+		buf = g_strdup_printf("echo \"%s\n%s\" > /persist/factory/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
 		//sprintf(buf, "echo \"%s\n%s\" > /etc/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
 		system(buf);
 
@@ -952,28 +984,19 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 
                 // sleep as long as specified by hawkbit
                 sleep_time = hawkbit_interval_check_sec;
-        } else if (status == 401) {
-                if (hawkbit_config->auth_token) {
-                        g_critical("Failed to authenticate. Check if auth_token is correct?");
-                } else if (hawkbit_config->gateway_token) {
-                        g_critical("Failed to authenticate. Check if gateway_token is correct?");
-                }
-
-                sleep_time = hawkbit_config->retry_wait;
-        } else {
+        }else {
                 g_debug("Scheduled check for new software failed status code: %d", status);
                 if (error) {
                         g_critical("HTTP Error: %s", error->message);
+
+						data->res = 13;
+						g_main_loop_quit(data->loop);
+						return G_SOURCE_REMOVE;				
                 }
                 sleep_time = hawkbit_config->retry_wait;
         }
         g_clear_error(&error);
 
-        if (run_once) {
-                data->res = status == 200 ? 0 : 1;
-                g_main_loop_quit(data->loop);
-                return G_SOURCE_REMOVE;
-        }
         return G_SOURCE_CONTINUE;
 }
 
