@@ -75,7 +75,7 @@ static const char *HTTPMethod_STRING[] = {
 
 static struct config *hawkbit_config = NULL;
 static GSourceFunc software_ready_cb;
-static gchar * volatile action_id = NULL;
+//static gchar * volatile action_id = NULL;
 static long hawkbit_interval_check_sec = DEFAULT_SLEEP_TIME_SEC;
 static long sleep_time = 0;
 static long last_run_sec = 0;
@@ -140,6 +140,59 @@ static gboolean get_recovery_result()
 	string[fsize] = 0;
 
 	return (0 == strncmp(string, "OTA success", strlen("OTA success")));
+}
+
+static gboolean reset_fail_attempts()
+{
+	remove("/persist/factory/rauc-hawkbit-updater/fails");
+	return TRUE;
+}
+
+static size_t set_fail_attempts(size_t attempts)
+{
+	g_autofree gchar *msg;
+
+	remove("/persist/factory/rauc-hawkbit-updater/fails");
+	msg = g_strdup_printf("echo \"%d\" > /persist/factory/rauc-hawkbit-updater/fails", attempts);
+	system(msg);
+	g_critical("Set fails attemps count to %d", attempts);
+	return 0;
+}
+
+static size_t get_fail_attempts()
+{
+	if( access("/persist/factory/rauc-hawkbit-updater/fails", 0 ) == 0 ) {
+
+		g_message("We have fail hystory");
+
+		FILE * fp;
+		char * fails = NULL;
+		size_t failsCount = 0;
+		size_t len = 0;
+		ssize_t read;
+
+		fp = fopen("/persist/factory/rauc-hawkbit-updater/fails", "r");
+		if (fp == NULL){
+			g_critical("Cannot open fails file even though it exists");
+			exit(EXIT_FAILURE);
+		}
+
+		if ((read = getline(&fails, &len, fp)) != -1) {
+			failsCount = atoi(fails);
+			g_debug("Current fails count |%s|%d|", fails, failsCount);
+		}
+		else {
+			g_critical("Cannot read fails count");
+			exit(EXIT_FAILURE);
+		}
+		fclose(fp);
+
+		return failsCount;
+	}
+	else {
+		g_critical("We do not have fail history");
+		return 0;
+	}
 }
 
 static gboolean check_if_inprogress()
@@ -668,9 +721,9 @@ static void process_artifact_cleanup(struct artifact *artifact)
 static void process_deployment_cleanup()
 {
         //g_clear_pointer(action_id, g_free);
-        gpointer ptr = action_id;
-        action_id = NULL;
-        g_free(ptr);
+        //gpointer ptr = action_id;
+        //action_id = NULL;
+       // g_free(ptr);
 
         if (g_file_test(hawkbit_config->bundle_download_location, G_FILE_TEST_EXISTS)) {
                 if (g_remove(hawkbit_config->bundle_download_location) != 0) {
@@ -704,7 +757,7 @@ static gpointer download_thread(gpointer data)
         gint64 end_time = g_get_monotonic_time();
 
         if (!res) {
-                g_autofree gchar *msg = g_strdup_printf("Download failed: %s Status: %d", error->message, status);
+                msg = g_strdup_printf("Download failed: %s Status: %d", error->message, status);
                 g_clear_error(&error);
                 g_critical("%s", msg);
                 feedback_progress(artifact->status, "SILENT_FAILURE", 6, "Failure details", msg, "", "", error, "");
@@ -725,16 +778,27 @@ static gpointer download_thread(gpointer data)
 
         // validate checksum
         if (g_strcmp0(artifact->sha256, checksum.checksum_result)) {
-                g_autofree gchar *msg = g_strdup_printf(
-                        "Software: %s V%s. Invalid checksum: %s expected %s",
-                        artifact->name, artifact->version,
-                        checksum.checksum_result,
-                        artifact->sha256);
+			g_autofree gchar *msgDetails = NULL;
 
-                feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "", "", error, "");
-                g_critical("%s", msg);
-                status = -3;
-                goto down_error;
+            msgDetails = g_strdup_printf(
+            "Software: %s V%s. Invalid checksum: %s expected %s",
+            artifact->name, artifact->version,
+            checksum.checksum_result,
+            artifact->sha256);
+
+			if (get_fail_attempts() >=2) {
+				msg = g_strdup_printf("CRC check failed and we reached an attempts limit. Stop campaign.");
+				reset_fail_attempts();
+				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "More details", msgDetails, error, "FAIL");
+				g_critical("%s", msg);
+			} else {
+				msg = g_strdup_printf("CRC check failed but we will try again");
+				set_fail_attempts(get_fail_attempts+1);
+				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "More details", msgDetails, error, "");
+				g_critical("%s", msg);
+			}
+            g_critical("%s", msg);
+            goto down_error;
         }
 
         g_message("File checksum OK");
@@ -743,36 +807,45 @@ static gpointer download_thread(gpointer data)
 
 		g_debug("Signature[%s]", artifact->signedDigest);
 
-		g_autofree gchar *buf;
+		//g_autofree gchar *buf;
 
-		buf = g_strdup_printf("echo %s > signed_digest_base64", artifact->signedDigest);
+		msg = g_strdup_printf("echo %s > signed_digest_base64", artifact->signedDigest);
 		//sprintf(buf, "echo %s > signed_digest_base64", artifact->signedDigest);
-		system(buf);
+		system(msg);
 
-		buf = g_strdup_printf("cat signed_digest_base64 | base64 -d > signed_digest", artifact->signedDigest);
+		msg = g_strdup_printf("cat signed_digest_base64 | base64 -d > signed_digest", artifact->signedDigest);
 		//sprintf(buf, "cat signed_digest_base64 | base64 -d > singed_digest", artifact->signedDigest);
-		system(buf);
+		system(msg);
 
-		buf = g_strdup_printf("openssl dgst -verify code_signing.pem -signature signed_digest /data/ota.raucb > /etc/rauc-hawkbit-updater/sig_check_result", artifact->signedDigest);
+		msg = g_strdup_printf("openssl dgst -verify code_signing.pem -signature signed_digest /data/ota.raucb > /etc/rauc-hawkbit-updater/sig_check_result", artifact->signedDigest);
 		//sprintf(buf, "openssl dgst -verify code_signing.pem -signature signed_digest ota.raucb > result", artifact->signedDigest);
-		system(buf);
+		system(msg);
 
 		if (!get_signature_check_result()) {
-			g_debug("Digital signature check FAIL");
-			feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", "Digital signature verification failed", "", "", error, "");
-            g_critical("%s", msg);
-            status = -4;
+
+			int fails;
+			fails = get_fail_attempts();
+		
+			if (fails >=2) {
+				msg = g_strdup_printf("Digital signature verification failed and we reached an attempts limit. Stop campaign.");
+				reset_fail_attempts();
+				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Digital Signature", artifact->signedDigest, error, "FAIL");
+			} else {
+				msg = g_strdup_printf("Digital signature verification failed but we will try again");
+				set_fail_attempts(fails+1);
+				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Digital Signature", artifact->signedDigest, error, "");
+			}
+			g_critical("%s", msg);
             goto down_error;
 		}
 
 		g_debug("Digital signature check SUCCESS");
 
 		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 84, "Details", "Digital signature verification passed", "", "", error, "");
-
 		feedback_progress(artifact->status, "INSTALLING",85, "Details", "Memory bank flashing start", "", "", error, "");
 
-		buf = g_strdup_printf("/etc/factory-test/r1/updateOTA.sh ota.raucb > /etc/rauc-hawkbit-updater/recovery_result ", artifact->signedDigest);
-		system(buf);
+		msg = g_strdup_printf("/etc/factory-test/r1/updateOTA.sh ota.raucb > /etc/rauc-hawkbit-updater/recovery_result ", artifact->signedDigest);
+		system(msg);
 
 		if (!get_recovery_result()) {
 			g_debug("Flashig memory bank FAIL");
@@ -783,7 +856,6 @@ static gpointer download_thread(gpointer data)
 		}
 
 		feedback_progress(artifact->status, "INSTALLING",86, "Details", "Memory bank flashing done", "", "", error, "");
-
 		feedback_progress(artifact->status, "PENDING_REBOOT", 87, "Details", "Now we wait for system reboot", "", "", error, "");
 
 		//feedback_progress(artifact->status, "EXECUTING", 90, "", "", "", "", NULL, FALSE, "");
@@ -792,9 +864,9 @@ static gpointer download_thread(gpointer data)
 
 		//sprintf(buf, "touch /etc/rauc-hawkbit-updater/inprogress");
 
-		buf = g_strdup_printf("echo \"%s\n%s\" > /persist/factory/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
+		msg = g_strdup_printf("echo \"%s\n%s\" > /persist/factory/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
 		//sprintf(buf, "echo \"%s\n%s\" > /etc/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
-		system(buf);
+		system(msg);
 
         g_free(checksum.checksum_result);
         process_artifact_cleanup(artifact);
@@ -805,9 +877,11 @@ static gpointer download_thread(gpointer data)
 
         return NULL;
 down_error:
-        g_free(checksum.checksum_result);
-        process_artifact_cleanup(artifact);
-        process_deployment_cleanup();
+        //g_free(checksum.checksum_result);
+        //process_artifact_cleanup(artifact);
+        //process_deployment_cleanup();
+
+		force_exit = TRUE;
         return NULL;
 }
 
@@ -926,6 +1000,19 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 	//	strcpy(get_tasks_url_new, "-v --cacert 3rdparty_infra_cert_chain.pem --cert client.crt --key client.key  https://172.16.69.103/v1/campaigns/speaker/deployment");
 	//	g_message("Checking for new software...get_tasks_url[%s]",get_tasks_url_new);
 
+		size_t fails;
+
+//		set_fail_attempts(1);
+
+		fails = get_fail_attempts();
+
+		g_message("fails[%d]",fails);
+
+//		data->res = 13;
+//		g_main_loop_quit(data->loop);
+//		return G_SOURCE_REMOVE;
+
+///////////////////////////////////////////////
 		update_current_version();
 
 		if (TRUE == check_if_inprogress()){
