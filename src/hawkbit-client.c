@@ -827,11 +827,11 @@ static gpointer download_thread(gpointer data)
 		//sprintf(buf, "echo %s > signed_digest_base64", artifact->signedDigest);
 		system(msg);
 
-		msg = g_strdup_printf("cat signed_digest_base64 | base64 -d > signed_digest", artifact->signedDigest);
+		msg = g_strdup_printf("cat signed_digest_base64 | base64 -d > signed_digest");
 		//sprintf(buf, "cat signed_digest_base64 | base64 -d > singed_digest", artifact->signedDigest);
 		system(msg);
 
-		msg = g_strdup_printf("openssl dgst -verify code_signing.pem -signature signed_digest /data/ota_small.raucb > /etc/rauc-hawkbit-updater/sig_check_result", artifact->signedDigest);
+		msg = g_strdup_printf("openssl dgst -verify code_signing.pem -signature signed_digest %s > /etc/rauc-hawkbit-updater/sig_check_result", hawkbit_config->bundle_download_location);
 		//sprintf(buf, "openssl dgst -verify code_signing.pem -signature signed_digest ota.raucb > result", artifact->signedDigest);
 		system(msg);
 
