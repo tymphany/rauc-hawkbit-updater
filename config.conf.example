@@ -1,43 +1,12 @@
 [client]
 # host or IP and optional port
-hawkbit_server            = 172.16.69.103
+server            = 172.16.69.103
 
 # true = HTTPS, false = HTTP
 ssl                       = true
 
-# validate ssl certificate (only use if ssl is true)
-ssl_verify                = true
-
-# Tenant id
-tenant_id                 = 0DD0ED4E-F0CD-4883-80C5-1361C8E0C415
-
-# Target name (controller id)
-target_name               = test-target
-
-# Security token
-auth_token                = a6a069f4822cc82afd84a92efb81cf49
-
-# Or gateway_token can be used instead of auth_token
-#gateway_token             = cb115a721af28f781b493fa467819ef5
-
 # Temporay file RAUC bundle should be downloaded to
 bundle_download_location  = /data/ota.raucb
 
-# time in seconds to wait before retrying
-retry_wait                = 60
-
-# connection timeout in seconds
-connect_timeout           = 20
-
-# request timeout in seconds
-timeout                   = 60
-
 # debug, info, message, critical, error, fatal
 log_level                 = debug
-
-# Every key / value under [device] is sent to HawkBit (target attributes),
-# and can be used in target filter.
-[device]
-mac_address               = ff:ff:ff:ff:ff:ff
-hw_revision               = 2
-model                     = T1
