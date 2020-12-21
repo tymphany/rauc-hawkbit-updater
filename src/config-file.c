@@ -38,13 +38,13 @@ static const gchar * DEFAULT_LOG_LEVEL    = "message";
 
 void config_file_free(struct config *config)
 {
-        g_free(config->hawkbit_server);
-        g_free(config->controller_id);
-        g_free(config->tenant_id);
-        g_free(config->auth_token);
-        g_free(config->gateway_token);
+        g_free(config->server);
+//        g_free(config->controller_id);
+//        g_free(config->tenant_id);
+//        g_free(config->auth_token);
+//        g_free(config->gateway_token);
         g_free(config->bundle_download_location);
-        g_hash_table_destroy(config->device);
+//        g_hash_table_destroy(config->device);
 }
 
 static gboolean get_key_string(GKeyFile *key_file, const gchar* group, const gchar* key, gchar** value, const gchar* default_value, GError **error)
@@ -182,57 +182,57 @@ struct config* load_config_file(const gchar* config_file, GError** error)
                 return NULL;
         }
 
-        if (!get_key_string(ini_file, "client", "hawkbit_server", &config->hawkbit_server, NULL, error))
+        if (!get_key_string(ini_file, "client", "server", &config->server, NULL, error))
                 return NULL;
 
-        key_auth_token_exists = get_key_string(ini_file, "client", "auth_token", &config->auth_token, NULL, NULL);
-        key_gateway_token_exists = get_key_string(ini_file, "client", "gateway_token", &config->gateway_token, NULL, NULL);
-        if (!key_auth_token_exists && !key_gateway_token_exists) {
-                g_set_error(error, 1, 4, "Neither auth_token nor gateway_token is set in the config.");
-                return NULL;
-        } else if (key_auth_token_exists && key_gateway_token_exists) {
-                g_warning("Both auth_token and gateway_token are set in the config.");
-        }
-
-        if (!get_key_string(ini_file, "client", "target_name", &config->controller_id, NULL, error))
-                return NULL;
-        if (!get_key_string(ini_file, "client", "tenant_id", &config->tenant_id, "DEFAULT", error))
-                return NULL;
+//        key_auth_token_exists = get_key_string(ini_file, "client", "auth_token", &config->auth_token, NULL, NULL);
+//        key_gateway_token_exists = get_key_string(ini_file, "client", "gateway_token", &config->gateway_token, NULL, NULL);
+//        if (!key_auth_token_exists && !key_gateway_token_exists) {
+//                g_set_error(error, 1, 4, "Neither auth_token nor gateway_token is set in the config.");
+//                return NULL;
+//        } else if (key_auth_token_exists && key_gateway_token_exists) {
+//                g_warning("Both auth_token and gateway_token are set in the config.");
+//        }
+//
+//        if (!get_key_string(ini_file, "client", "target_name", &config->controller_id, NULL, error))
+//                return NULL;
+//        if (!get_key_string(ini_file, "client", "tenant_id", &config->tenant_id, "DEFAULT", error))
+//                return NULL;
         if (!get_key_string(ini_file, "client", "bundle_download_location", &config->bundle_download_location, NULL, error))
                 return NULL;
         if (!get_key_bool(ini_file, "client", "ssl", &config->ssl, DEFAULT_SSL, error))
                 return NULL;
-        if (!get_key_bool(ini_file, "client", "ssl_verify", &config->ssl_verify, DEFAULT_SSL_VERIFY, error))
-                return NULL;
-        if (!get_group(ini_file, "device", &config->device, error))
-                return NULL;
-
-        if (!get_key_int(ini_file, "client", "connect_timeout", &val_int, DEFAULT_CONNECTTIMEOUT, error))
-                return NULL;
-        config->connect_timeout = val_int;
-
-        if (!get_key_int(ini_file, "client", "timeout", &val_int, DEFAULT_TIMEOUT, error))
-                return NULL;
-        config->timeout = val_int;
-
-        if (!get_key_int(ini_file, "client", "retry_wait", &val_int, DEFAULT_RETRY_WAIT, error))
-                return NULL;
-        config->retry_wait = val_int;
-
+//        if (!get_key_bool(ini_file, "client", "ssl_verify", &config->ssl_verify, DEFAULT_SSL_VERIFY, error))
+//                return NULL;
+//        if (!get_group(ini_file, "device", &config->device, error))
+//                return NULL;
+//
+//        if (!get_key_int(ini_file, "client", "connect_timeout", &val_int, DEFAULT_CONNECTTIMEOUT, error))
+//                return NULL;
+//        config->connect_timeout = val_int;
+//
+//        if (!get_key_int(ini_file, "client", "timeout", &val_int, DEFAULT_TIMEOUT, error))
+//                return NULL;
+//        config->timeout = val_int;
+//
+//        if (!get_key_int(ini_file, "client", "retry_wait", &val_int, DEFAULT_RETRY_WAIT, error))
+//                return NULL;
+//        config->retry_wait = val_int;
+//
         if (!get_key_string(ini_file, "client", "log_level", &val, DEFAULT_LOG_LEVEL, error))
                 return NULL;
         config->log_level = log_level_from_string(val);
 
-        if (config->timeout > 0 && config->connect_timeout > 0 && config->timeout < config->connect_timeout) {
-                g_set_error(error,
-                            G_KEY_FILE_ERROR,                   // error domain
-                            G_KEY_FILE_ERROR_INVALID_VALUE,     // error code
-                            "timeout should be greater than connect_timeout. Timeout: %ld, Connect timeout: %ld",
-                            config->timeout,
-                            config->connect_timeout
-                            );
-                return NULL;
-        }
+//        if (config->timeout > 0 && config->connect_timeout > 0 && config->timeout < config->connect_timeout) {
+//                g_set_error(error,
+//                            G_KEY_FILE_ERROR,                   // error domain
+//                            G_KEY_FILE_ERROR_INVALID_VALUE,     // error code
+//                            "timeout should be greater than connect_timeout. Timeout: %ld, Connect timeout: %ld",
+//                            config->timeout,
+//                            config->connect_timeout
+//                            );
+//                return NULL;
+//        }
 
         return config;
 }

@@ -90,6 +90,17 @@ static gboolean checkPoints[FILE_DOWNLOAD_CHECKPOINTS_NUM] = {FALSE};
 
 static gboolean feedback_progress(const gchar *url, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, GError **error, const gchar *finalResult);
 
+static void send_wait_for_reboot_message()
+{
+	g_autofree gchar *msg = NULL;
+
+	//adk-message-send 'connectivity_wifi_enable {}'
+
+	msg = g_strdup_printf("adk-message-send 'system_mode_management {name:\"ota::Wait4Reboot\"}'");
+	//sprintf(buf, "echo %s > signed_digest_base64", artifact->signedDigest);
+	system(msg);
+}
+
 static void update_current_version()
 {
 	FILE *f = fopen("/etc/sw-version.conf", "rb");
@@ -695,7 +706,7 @@ static gchar* build_api_url(const gchar *path, ...)
         buffer = g_strdup_vprintf(path, args);
         va_end(args);
 
-        return g_strdup_printf("%s://%s%s", hawkbit_config->ssl ? "https" : "http", hawkbit_config->hawkbit_server, buffer);
+        return g_strdup_printf("%s://%s%s", hawkbit_config->ssl ? "https" : "http", hawkbit_config->server, buffer);
 }
 
 static void process_artifact_cleanup(struct artifact *artifact)
@@ -741,7 +752,8 @@ static gpointer download_thread(gpointer data)
         GError *error = NULL;
         g_autofree gchar *msg = NULL;
         struct artifact *artifact = data;
-
+		gint fails;
+					
 		g_message("Start downloading: %s\n\r", artifact->downloadUrl);
 
         // setup checksum
@@ -786,14 +798,16 @@ static gpointer download_thread(gpointer data)
             checksum.checksum_result,
             artifact->sha256);
 
-			if (get_fail_attempts() >=2) {
+			fails = get_fail_attempts();
+
+			if (fails >=2) {
 				msg = g_strdup_printf("CRC check failed and we reached an attempts limit. Stop campaign.");
 				reset_fail_attempts();
 				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "More details", msgDetails, error, "FAIL");
 				g_critical("%s", msg);
 			} else {
 				msg = g_strdup_printf("CRC check failed but we will try again");
-				set_fail_attempts(get_fail_attempts+1);
+				set_fail_attempts(fails+1);
 				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "More details", msgDetails, error, "");
 				g_critical("%s", msg);
 			}
@@ -817,13 +831,12 @@ static gpointer download_thread(gpointer data)
 		//sprintf(buf, "cat signed_digest_base64 | base64 -d > singed_digest", artifact->signedDigest);
 		system(msg);
 
-		msg = g_strdup_printf("openssl dgst -verify code_signing.pem -signature signed_digest /data/ota.raucb > /etc/rauc-hawkbit-updater/sig_check_result", artifact->signedDigest);
+		msg = g_strdup_printf("openssl dgst -verify code_signing.pem -signature signed_digest /data/ota_small.raucb > /etc/rauc-hawkbit-updater/sig_check_result", artifact->signedDigest);
 		//sprintf(buf, "openssl dgst -verify code_signing.pem -signature signed_digest ota.raucb > result", artifact->signedDigest);
 		system(msg);
 
 		if (!get_signature_check_result()) {
 
-			int fails;
 			fails = get_fail_attempts();
 		
 			if (fails >=2) {
@@ -867,6 +880,8 @@ static gpointer download_thread(gpointer data)
 		msg = g_strdup_printf("echo \"%s\n%s\" > /persist/factory/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
 		//sprintf(buf, "echo \"%s\n%s\" > /etc/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
 		system(msg);
+
+		send_wait_for_reboot_message();
 
         g_free(checksum.checksum_result);
         process_artifact_cleanup(artifact);
@@ -1080,7 +1095,7 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 						g_main_loop_quit(data->loop);
 						return G_SOURCE_REMOVE;				
                 }
-                sleep_time = hawkbit_config->retry_wait;
+//                sleep_time = hawkbit_config->retry_wait;
         }
         g_clear_error(&error);
 

@@ -28,19 +28,19 @@
  * @brief struct that contains the Rauc HawkBit configuration.
  */
 struct config {
-        gchar* hawkbit_server;            /**< hawkBit host or IP and port */
+        gchar* server;                    /**< server host or IP and port */
         gboolean ssl;                     /**< use https or http */
-        gboolean ssl_verify;              /**< verify https certificate */
-        gchar* auth_token;                /**< hawkBit target security token */
-        gchar* gateway_token;             /**< hawkBit gateway security token */
-        gchar* tenant_id;                 /**< hawkBit tenant id */
-        gchar* controller_id;             /**< hawkBit controller id*/
+//        gboolean ssl_verify;              /**< verify https certificate */
+//        gchar* auth_token;                /**< hawkBit target security token */
+//        gchar* gateway_token;             /**< hawkBit gateway security token */
+//        gchar* tenant_id;                 /**< hawkBit tenant id */
+//        gchar* controller_id;             /**< hawkBit controller id*/
         gchar* bundle_download_location;  /**< file to download rauc bundle to */
-        long connect_timeout;             /**< connection timeout */
-        long timeout;                     /**< reply timeout */
-        int retry_wait;                   /**< wait between retries */
+//        long connect_timeout;             /**< connection timeout */
+//        long timeout;                     /**< reply timeout */
+//        int retry_wait;                   /**< wait between retries */
         GLogLevelFlags log_level;         /**< log level */
-        GHashTable* device;               /**< Additional attributes sent to hawkBit */
+//        GHashTable* device;               /**< Additional attributes sent to hawkBit */
 };
 
 struct config* load_config_file(const gchar* config_file, GError** error);
