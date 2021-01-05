@@ -1,0 +1,1 @@
+/etc/factory-test/r1/connect_wifi.sh rivian_vpn kitty1313

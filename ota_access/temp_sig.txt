@@ -1,0 +1,20 @@
+<
+{"id":"10f47e30-5260-4f16-829f-743485445cb8","state":"NOT_STARTED","status":"https://172.16.69.103/v1/deployments/10f47e30-5260-4f16-829f-743485445cb8/states","action":"UPDATE","artifacts":[{"id":"3c2b1000-22fa-4192-9895-fa35cba333f0","sha256":"54ff29e7d65f5b7ead15b22525e50205a414e219305352b378bd0060b914ed38","size":695,"name":"paragraph.txt","downloadUrl":"https://eng-speaker-s3-vcloud-package-distribution.s3.us-east-2.amazonaws.com/swpackages/17ce008b-ae8b-4024-a79b-262167269b73?X-Amz-Security-Token=IQoJb3JpZ2luX2VjEAQaCXVzLWVhc3QtMiJGMEQCIC6%2BKCJw8HQrT42Xe9F8FSHbRNYo6saZX%2BKItH5WhrQqAiAbzyaslGHpwIjLjlv5O8sW9Tozn37oUntXinj%2Fqmze6Cq0AwhtEAAaDDk2OTg5MDQ0NjYyMyIM%2Fy4GTUMrdK0Lvvx8KpEDseKQfocpzFevRvgudOPIIhYQ2DsPdqllmUJMitKNqFFJ8nZyuZ%2F9IGXtk5GnUdCX8Yuj5B86W0LuoqrobObEc0kWamWRjEujK5jitJ1gsTAwQ2EPfL9R8TEIjR9ZdsctV%2BBIqK126ZQdx8TfKivMXDy2Q3Pv13KGbL5EcahyVqws4LfcoTVMcUFfn4yn7AE0s2%2Bxpjy5jrTO98RrpoL3sTdtxWrURcKtAhzQmWv0QI1oTO%2FKJugdkJMSLwtB3DKh31w3ta2PbxoCtJfNk3YOFzOjUIuxZoDMtSLiZ1CzRGFp6J5bb4AYm7uGbFoYAH%2BIwhKzD7gAKuQa9whHmZ4s2AJ7ur%2Fz0fdZWi73T0yG2fMtn7nfeRS7t%2BSWX5t8%2FVok60SA1TnkDNDZDzV9ZQByO2DYf9dRs4jgqP6rODsRAdBsk82ZcpwwwQTN8yYk8AA6eBiZTC6BcXv1olbHHFFz%2Bg%2FMmv%2BfEEbYL%2BzLwvBl9pGYD%2BkrrBT9qMB1wqbsk6RmeZdjmZxvk15RGJZeAdvokYwwq6Go%2FQU67AHjwi4AeQE1O7GbGs3Z1YxNTefZG2781YHId99LqRE2W3nRpQFi0%2FGuBd5dZiw%2Fsqn%2F61%2BXDC%2FIfnNgmGRkFALNb%2F6Kfa26W3%2BtTBejwH90k6v1VcfwFeUl%2BHGuy%2BNFTuMhc6r6vTWx3YF%2BOuX1Gjn417UO0VmnTlZmcLQCBU9QxgyMU3EZtS1TiX%2BiQ0AutgVb3PP7cF%2BKLbkWQ5B3JrjiJaml%2FbA6PmGZZxhfTFzeVS3yItUISTk%2FF1XjnRCN2NXpO06i7aolQWMq07vJuBDnSbIjGaUqF3xCZQyfhoDa9L4NDqlqAOHQAJV9Lg%3D%3D&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20201110T051602Z&X-Amz-SignedHeaders=host&X-Amz-Expires=86400&X-Amz-Credential=ASIA6DUPZXUPTNRVH3EU%2F20201110%2Fus-east-2%2Fs3%2Faws4_request&X-Amz-Signature=dcf66a5c0baef45ded4fb11c864c38ab0ed9ff9245d05726f24341f4f97100b4","filetype":"TGZ","signedDigest":"MEYCIQCbCNobfANl/8pV9is6E1/dQON7/yZbCJoFZszbSl4KGwIhAPjAUmxZ6Hk8xzxHG2gPK/08UFVNfHfop91fGTtuVB5C"}],"metadata":{"version":"2.2.2"}}~/ota_access #
+~/ota_access #
+~/ota_access #
+
+
+"MEYCIQCbCNobfANl/8pV9is6E1/dQON7/yZbCJoFZszbSl4KGwIhAPjAUmxZ6Hk8xzxHG2gPK/08UFVNfHfop91fGTtuVB5C"
+
+
+decode bas64 signed digest (from signedDigest field in the check update response above)
+
+
+cat signed_digest_base64 | base64 -d > signed_digest
+
+
+cat "MEYCIQCbCNobfANl/8pV9is6E1/dQON7/yZbCJoFZszbSl4KGwIhAPjAUmxZ6Hk8xzxHG2gPK/08UFVNfHfop91fGTtuVB5C"| base64 -d > signed_digest
+
+
+
+openssl dgst -verify test_signing_pub.pem -signature signed_digest foo.tar.gz
