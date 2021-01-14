@@ -67,7 +67,7 @@ gboolean volatile force_exit = FALSE;
 gboolean run_once = FALSE;
 gboolean volatile force_check_run = FALSE;
 
-gchar   currentVersion[10] = "0.0.0";
+gchar   currentVersion[20] = "0.0.0";
 
 /**
  * @brief String representation of HTTP methods.
