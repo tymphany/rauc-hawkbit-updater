@@ -879,6 +879,9 @@ static gpointer download_thread(gpointer data)
 		//sprintf(buf, "echo \"%s\n%s\" > /etc/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
 		system(msg);
 
+		msg = g_strdup_printf("echo \"\" > /data/ota-successed");
+		system(msg);
+
 		send_wait_for_reboot_message();
 
         g_free(checksum.checksum_result);
