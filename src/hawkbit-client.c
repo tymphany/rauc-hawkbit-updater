@@ -61,6 +61,7 @@
 #define FILE_DOWNLOAD_ALL_IN_ALL_PERCENT_PER_CHECKPOINT (FILE_DOWNLOAD_DONE_ALL_IN_ALL_PERCENT / FILE_DOWNLOAD_CHECKPOINTS_NUM)
 #define LONG_MAX (0xFFFFFFFF)
 #define CHECK_INTERVALS_SEC (30)
+#define MIN_INTERVAL_BETWEEN_CHECKS_SEC (30) // (60 * 60 * 24)
 
 gboolean volatile force_exit = FALSE;
 
@@ -91,6 +92,83 @@ static const char *pKeyType = "PEM";
 static gboolean checkPoints[FILE_DOWNLOAD_CHECKPOINTS_NUM] = {FALSE};
 
 static gboolean feedback_progress(const gchar *url, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, GError **error, const gchar *finalResult);
+
+static void recordTime()
+{
+	g_autofree gchar *msg = NULL;
+
+	msg = g_strdup_printf("date %s > /persist/factory/rauc-hawkbit-updater/lastCheck", "+%s");
+
+	system(msg);
+}
+
+static gboolean ifItIsAlreadyTime()
+{
+	FILE * fp;
+	size_t last, now;
+	char * temp = NULL;
+	size_t len = 0;
+	ssize_t read;
+	g_autofree gchar *msg = NULL;
+
+	msg = g_strdup_printf("date %s > /persist/factory/rauc-hawkbit-updater/lastAttempt", "+%s");
+
+	system(msg);
+
+	if( access("/persist/factory/rauc-hawkbit-updater/lastCheck", 0 ) == 0 ) {
+
+		g_debug("We have ota check history");
+
+		fp = fopen("/persist/factory/rauc-hawkbit-updater/lastCheck", "r");
+		if (fp == NULL){
+			g_critical("Cannot open ota last check even though it exists");
+			return TRUE;
+		}
+
+		if ((read = getline(&temp, &len, fp)) != -1) {
+			last = atoi(temp);
+			g_debug("Last|%d|", last);
+		}
+
+		fclose(fp);
+	}
+	else {
+		g_debug("We do not have last check");
+		return TRUE;
+	}
+
+	if( access("/persist/factory/rauc-hawkbit-updater/lastAttempt", 0 ) == 0 ) {
+
+		fp = fopen("/persist/factory/rauc-hawkbit-updater/lastAttempt", "r");
+		if (fp == NULL){
+			g_critical("Cannot open ota last attempt even though it exists");
+			return TRUE;
+		}
+
+		if ((read = getline(&temp, &len, fp)) != -1) {
+			now = atoi(temp);
+			g_debug("Now |%d|", now);
+		}
+
+		fclose(fp);
+	}
+	else {
+		g_debug("We do not have ota last attempt");
+		return TRUE;
+	}
+
+	g_debug("Seconds since last check passed %d", now - last);
+
+	if (now - last > MIN_INTERVAL_BETWEEN_CHECKS_SEC)
+	{
+		return TRUE;
+	}
+	else
+	{
+		return FALSE;
+	}
+
+}
 
 static void send_wait_for_reboot_message()
 {
@@ -1036,12 +1114,19 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 			return G_SOURCE_REMOVE;
 		}
 
+		if (FALSE == ifItIsAlreadyTime()){
+			data->res = 13;
+			g_main_loop_quit(data->loop);
+			return G_SOURCE_REMOVE;
+		}
+
 		g_debug("Checking for new software...get_tasks_url[%s]",get_tasks_url);
 
 		int status = rest_request(GET, get_tasks_url, NULL, &json_response_parser, &error, FALSE);
 
         if (status == 200) {
 			g_debug("Response status code: %d", status);
+			recordTime();
             if (json_response_parser) {
                 // json_root is owned by the JsonParser and should never be modified or freed.
                 JsonNode *json_root = json_parser_get_root(json_response_parser);
@@ -1063,20 +1148,21 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
                     g_debug("process_deployment Error: %s", error->message);
 
             sleep_time = LONG_MAX;
-        }else {
+        }else if (status == 204) {
             g_debug("Response status code: %d", status);
             if (error) {
                 g_debug("HTTP Error: %s", error->message);
-
-				sleep_time = CHECK_INTERVALS_SEC;
-
-				//exit(EXIT_FAILURE);
+				//sleep_time = CHECK_INTERVALS_SEC;
 //
 //						data->res = 13;
 //						g_main_loop_quit(data->loop);
 //						return G_SOURCE_REMOVE;				
             }
+			recordTime();
+			exit(EXIT_FAILURE);
 //              
+        } else {
+        	exit(EXIT_FAILURE);
         }
         g_clear_error(&error);
 
