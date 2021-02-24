@@ -91,6 +91,9 @@ struct artifact {
         gchar* filetype;
 		gchar* signedDigest;
 
+		gchar* signingCertificate;
+		gchar* signingIntermediateCA;
+
 		gchar* version;
 		//gboolean* forced_update;
 };

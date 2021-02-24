@@ -59,9 +59,9 @@
 #define FILE_DOWNLOAD_DONE_ALL_IN_ALL_PERCENT (75)
 #define FILE_DOWNLOAD_CHECKPOINTS_PERCENT_STEP           (100 / FILE_DOWNLOAD_CHECKPOINTS_NUM)
 #define FILE_DOWNLOAD_ALL_IN_ALL_PERCENT_PER_CHECKPOINT (FILE_DOWNLOAD_DONE_ALL_IN_ALL_PERCENT / FILE_DOWNLOAD_CHECKPOINTS_NUM)
-#define LONG_MAX (0xFFFFFFFF)
+#define MAX_TIME (0xFFFFFFFF)
 #define CHECK_INTERVALS_SEC (30)
-#define MIN_INTERVAL_BETWEEN_CHECKS_SEC (30) // (60 * 60 * 24)
+#define MIN_INTERVAL_BETWEEN_CHECKS_SEC 1//(60 * 60 * 24)
 
 gboolean volatile force_exit = FALSE;
 
@@ -83,10 +83,10 @@ static GSourceFunc software_ready_cb;
 static long sleep_time = 0;
 static long last_run_sec = 0;
 
-static const char *pCertFile   = "client.crt";
-static const char *pCACertFile = "3rdparty_infra_cert_chain.pem";
+static const char *pCertFile   = "/etc/rauc-hawkbit-updater/ota_access/client.crt";
+static const char *pCACertFile = "/etc/rauc-hawkbit-updater/ota_access/3rdparty_infra_cert_chain.pem";
 
-static const char *pKeyName = "client.key";
+static const char *pKeyName = "/etc/rauc-hawkbit-updater/ota_access/client.key";
 static const char *pKeyType = "PEM";
 
 static gboolean checkPoints[FILE_DOWNLOAD_CHECKPOINTS_NUM] = {FALSE};
@@ -199,6 +199,22 @@ static void update_current_version()
 	//return G_SOURCE_CONTINUE;
 
 	sprintf(currentVersion, "%s", string);
+}
+
+static gboolean get_certificate_against_chain_check_result()
+{
+	FILE *f = fopen("/etc/rauc-hawkbit-updater/code_signing_cert_against_intermediate_result", "rb");
+	fseek(f, 0, SEEK_END);
+	long fsize = ftell(f);
+	fseek(f, 0, SEEK_SET);
+
+	char *string = malloc(fsize + 1);
+	fread(string, 1, fsize, f);
+	fclose(f);
+
+	string[fsize] = 0;
+
+	return (0 == strncmp(string, "signingCertificate.crt: OK", strlen("signingCertificate.crt: OK")));
 }
 
 static gboolean get_signature_check_result()
@@ -325,7 +341,7 @@ static gboolean check_if_inprogress()
 				remove("/persist/factory/rauc-hawkbit-updater/inprogress");
 			}
 			else {
-				g_debug("Update has not been finilized, pending for to reboot as a last step");
+				g_debug("Update has not been finilized, pending for reboot as a last step");
 			}
 		}
 		else {
@@ -804,6 +820,8 @@ static void process_artifact_cleanup(struct artifact *artifact)
 		g_free(artifact->downloadUrl);
 		g_free(artifact->filetype);
 		g_free(artifact->signedDigest);
+		g_free(artifact->signingCertificate);
+		g_free(artifact->signingIntermediateCA);
 		g_free(artifact->version);
         g_free(artifact);
 }
@@ -832,7 +850,7 @@ static gpointer download_thread(gpointer data)
         g_autofree gchar *msg = NULL;
         struct artifact *artifact = data;
 		gint fails;
-					
+
 		g_debug("Start downloading: %s\n\r", artifact->downloadUrl);
 
         // setup checksum
@@ -892,30 +910,80 @@ static gpointer download_thread(gpointer data)
             goto down_error;
         }
 
-        g_debug("File checksum OK");
 
-		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", "Checksum check passed", "", "", error, "");
+		msg = g_strdup_printf("Checksum check passed");
+		g_debug("%s",msg);
 
-		g_debug("Signature[%s]", artifact->signedDigest);
+		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", msg, "", "", error, "");
 
-		//g_autofree gchar *buf;
+/*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	0. Save certificates and asignature to file system
+*//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-		msg = g_strdup_printf("echo %s > signed_digest_base64", artifact->signedDigest);
-		//sprintf(buf, "echo %s > signed_digest_base64", artifact->signedDigest);
+		msg = g_strdup_printf("echo \"%s\" > signed_digest_base64", artifact->signedDigest);
+		system(msg);
+		msg = g_strdup_printf("echo \"%s\" > signingCertificate.crt", artifact->signingCertificate);
+		system(msg);
+		msg = g_strdup_printf("echo \"%s\" > signingIntermediateCA.crt", artifact->signingIntermediateCA);
 		system(msg);
 
-		msg = g_strdup_printf("cat signed_digest_base64 | base64 -d > signed_digest");
-		//sprintf(buf, "cat signed_digest_base64 | base64 -d > singed_digest", artifact->signedDigest);
+/*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	1. Validating the authenticity of signingCertificate against signingIntermediateCA
+*//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+		msg = g_strdup_printf("openssl verify -verbose -CAfile signingIntermediateCA.crt signingCertificate.crt > /etc/rauc-hawkbit-updater/code_signing_cert_against_intermediate_result");
 		system(msg);
 
-		msg = g_strdup_printf("openssl dgst -verify code_signing.pem -signature signed_digest %s > /etc/rauc-hawkbit-updater/sig_check_result", hawkbit_config->bundle_download_location);
-		//sprintf(buf, "openssl dgst -verify code_signing.pem -signature signed_digest ota.raucb > result", artifact->signedDigest);
+		if(!get_certificate_against_chain_check_result()) {
+
+			fails = get_fail_attempts();
+
+			if (fails >=2) {
+				msg = g_strdup_printf("Validating the authenticity of signingCertificate against signingIntermediateCA failed and we have reached an attempts limit. Stop campaign.");
+				reset_fail_attempts();
+				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Certificate", artifact->signingCertificate, error, "FAIL");
+			} else {
+				msg = g_strdup_printf("Validating the authenticity of signingCertificate against signingIntermediateCA failed but we will try again");
+				set_fail_attempts(fails+1);
+				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Certificate", artifact->signingCertificate, error, "");
+			}
+			g_critical("%s", msg);
+			goto down_error;
+		}
+
+		msg = g_strdup_printf("Validating the authenticity of signingCertificate against signingIntermediateCA failed but we will try again");
+		g_debug("%s",msg);
+
+		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", msg, "", "", error, "");
+
+/*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	2. Verify rootCA included in signingIntermediateCA (it is the first cert in the chain (at the top)) against rootCA pinned in firmware. This is just a string comparison.
+*//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	//TODO
+
+/*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	3. signingCertificate.crt -> code_signing_certificate_public_key.pem
+*//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	msg = g_strdup_printf("openssl x509 -pubkey -noout -in signingCertificate.crt > code_signing_certificate_public_key.pem");
+	system(msg);
+
+/*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	4. Check signature
+*//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+		msg = g_strdup_printf("openssl dgst -sha256 -binary -out ota.raucb.bin.sha256 %s", hawkbit_config->bundle_download_location);
+		system(msg);
+		msg = g_strdup_printf("base64 --decode signed_digest_base64 > signature.bin");
+		system(msg);
+		msg = g_strdup_printf("openssl dgst -sha256 -verify code_signing_certificate_public_key.pem -signature signature.bin ota.raucb.bin.sha256 > /etc/rauc-hawkbit-updater/sig_check_result");
 		system(msg);
 
 		if (!get_signature_check_result()) {
 
 			fails = get_fail_attempts();
-		
+
 			if (fails >=2) {
 				msg = g_strdup_printf("Digital signature verification failed and we reached an attempts limit. Stop campaign.");
 				reset_fail_attempts();
@@ -930,6 +998,10 @@ static gpointer download_thread(gpointer data)
 		}
 
 		g_debug("Digital signature check SUCCESS");
+
+		g_free(checksum.checksum_result);
+        process_artifact_cleanup(artifact);
+		process_deployment_cleanup();
 
 		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 84, "Details", "Digital signature verification passed", "", "", error, "");
 		feedback_progress(artifact->status, "INSTALLING",85, "Details", "Memory bank flashing start", "", "", error, "");
@@ -996,20 +1068,20 @@ static gboolean process_deployment(JsonNode *req_root, GError **error)
         // get artifact information
         artifact = g_new0(struct artifact, 1);
 
-		artifact->response_id   = json_get_string(req_root, "$.id");
-		artifact->state         = json_get_string(req_root, "$.state");
-		artifact->status        = json_get_string(req_root, "$.status");
-		artifact->action        = json_get_string(req_root, "$.action");
-
-        artifact->artifact_id   = json_get_string(json_artifact, "$.id");
-        artifact->sha256        = json_get_string(json_artifact, "$.sha256");
-        artifact->size          = json_get_int   (json_artifact, "$.size");
-        artifact->name          = json_get_string(json_artifact, "$.name");
-        artifact->downloadUrl   = json_get_string(json_artifact, "$.downloadUrl");
-        artifact->filetype      = json_get_string(json_artifact, "$.filetype");
-		artifact->signedDigest  = json_get_string(json_artifact, "$.signedDigest");
-
-		artifact->version       = json_get_string (req_root,  "$.metadata.version");
+		artifact->response_id           = json_get_string(req_root, "$.id");
+		artifact->state                 = json_get_string(req_root, "$.state");
+		artifact->status                = json_get_string(req_root, "$.status");
+		artifact->action                = json_get_string(req_root, "$.action");
+        artifact->artifact_id           = json_get_string(json_artifact, "$.id");
+        artifact->sha256                = json_get_string(json_artifact, "$.sha256");
+        artifact->size                  = json_get_int   (json_artifact, "$.size");
+        artifact->name                  = json_get_string(json_artifact, "$.name");
+        artifact->downloadUrl           = json_get_string(json_artifact, "$.downloadUrl");
+        artifact->filetype              = json_get_string(json_artifact, "$.filetype");
+		artifact->signedDigest          = json_get_string(json_artifact, "$.signedDigest");
+		artifact->signingCertificate    = json_get_string(json_artifact, "$.signingCertificate");
+		artifact->signingIntermediateCA = json_get_string(json_artifact, "$.signingIntermediateCA");
+		artifact->version               = json_get_string (req_root,  "$.metadata.version");
 
         if (artifact->downloadUrl == NULL) {
 
@@ -1132,8 +1204,8 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
                 JsonNode *json_root = json_parser_get_root(json_response_parser);
                 g_autofree gchar *str = json_to_string(json_root, TRUE);
                 g_debug("Deployment response: %s\n", str);
-				
-				sleep_time = LONG_MAX;
+
+				sleep_time = MAX_TIME;
 
                 // get hawkbit sleep time (how often should we check for new software)
                 //hawkbit_interval_check_sec = json_get_sleeptime(json_root);
@@ -1148,7 +1220,7 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
                     g_debug("process_deployment Error: %s", error->message);
 
             sleep_time = LONG_MAX;
-        }else if (status == 204) {
+        }else if (status == 204) { // successfully connected back-end, no update needed.
             g_debug("Response status code: %d", status);
             if (error) {
                 g_debug("HTTP Error: %s", error->message);
@@ -1156,11 +1228,11 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 //
 //						data->res = 13;
 //						g_main_loop_quit(data->loop);
-//						return G_SOURCE_REMOVE;				
+//						return G_SOURCE_REMOVE;
             }
 			recordTime();
 			exit(EXIT_FAILURE);
-//              
+//
         } else {
         	exit(EXIT_FAILURE);
         }
@@ -1247,3 +1319,4 @@ finish:
 
         return res;
 }
+
