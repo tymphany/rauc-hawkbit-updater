@@ -62,8 +62,9 @@
 #define MAX_TIME (0xFFFFFFFF)
 #define CHECK_INTERVALS_SEC (30)
 #define MIN_INTERVAL_BETWEEN_CHECKS_SEC 1//(60 * 60 * 24)
+#define APPARENTLY_CRASHED_LAST_ATTEMPT (60 * 60 * 24)
 
-gboolean volatile force_exit = FALSE;
+gboolean volatile if_attempt_done = FALSE;
 
 gboolean run_once = FALSE;
 gboolean volatile force_check_run = FALSE;
@@ -80,7 +81,7 @@ static const char *HTTPMethod_STRING[] = {
 static struct config *hawkbit_config = NULL;
 static GSourceFunc software_ready_cb;
 //static gchar * volatile action_id = NULL;
-static long sleep_time = 0;
+static long sleep_time_sec = 0;
 static long last_run_sec = 0;
 
 static const char *pCertFile   = "/etc/rauc-hawkbit-updater/ota_access/client.crt";
@@ -93,7 +94,7 @@ static gboolean checkPoints[FILE_DOWNLOAD_CHECKPOINTS_NUM] = {FALSE};
 
 static gboolean feedback_progress(const gchar *url, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, GError **error, const gchar *finalResult);
 
-static void recordTime()
+static void recordLastCheckTime()
 {
 	g_autofree gchar *msg = NULL;
 
@@ -102,18 +103,22 @@ static void recordTime()
 	system(msg);
 }
 
+static gboolean attempt_done()
+{
+	//remove("/persist/factory/rauc-hawkbit-updater/now");
+	//return TRUE;
+}
+
 static gboolean ifItIsAlreadyTime()
 {
 	FILE * fp;
-	size_t last, now;
+	size_t lastCheck = 0;
+	size_t now_prev = 0;
+	size_t now = 0;
 	char * temp = NULL;
 	size_t len = 0;
 	ssize_t read;
 	g_autofree gchar *msg = NULL;
-
-	msg = g_strdup_printf("date %s > /persist/factory/rauc-hawkbit-updater/lastAttempt", "+%s");
-
-	system(msg);
 
 	if( access("/persist/factory/rauc-hawkbit-updater/lastCheck", 0 ) == 0 ) {
 
@@ -126,8 +131,8 @@ static gboolean ifItIsAlreadyTime()
 		}
 
 		if ((read = getline(&temp, &len, fp)) != -1) {
-			last = atoi(temp);
-			g_debug("Last|%d|", last);
+			lastCheck = atoi(temp);
+			g_debug("Last|%d|", lastCheck);
 		}
 
 		fclose(fp);
@@ -137,34 +142,50 @@ static gboolean ifItIsAlreadyTime()
 		return TRUE;
 	}
 
-	if( access("/persist/factory/rauc-hawkbit-updater/lastAttempt", 0 ) == 0 ) {
+	if( access("/persist/factory/rauc-hawkbit-updater/now", 0 ) == 0 ) {
 
-		fp = fopen("/persist/factory/rauc-hawkbit-updater/lastAttempt", "r");
+		fp = fopen("/persist/factory/rauc-hawkbit-updater/now", "r");
 		if (fp == NULL){
-			g_critical("Cannot open ota last attempt even though it exists");
+			g_critical("We have last atempt not finished but cannot open ota last attempt even though it exists");
 			return TRUE;
 		}
 
 		if ((read = getline(&temp, &len, fp)) != -1) {
-			now = atoi(temp);
-			g_debug("Now |%d|", now);
+			now_prev = atoi(temp);
+			g_debug("We have last atempt not finished |%d|", now_prev);
 		}
 
 		fclose(fp);
 	}
-	else {
-		g_debug("We do not have ota last attempt");
+	
+	msg = g_strdup_printf("date %s > /persist/factory/rauc-hawkbit-updater/now", "+%s");
+	system(msg);
+	
+	fp = fopen("/persist/factory/rauc-hawkbit-updater/now", "r");
+	if (fp == NULL){
+		g_critical("Cannot open now even though it exists");
 		return TRUE;
 	}
+	
+	if ((read = getline(&temp, &len, fp)) != -1) {
+		now = atoi(temp);
+		g_debug("We have last atempt not finished |%d|", now);
+	}
+	
+	fclose(fp);
 
-	g_debug("Seconds since last check passed %d", now - last);
+	g_debug("Seconds since last check passed %d", now - lastCheck);
 
-	if (now - last > MIN_INTERVAL_BETWEEN_CHECKS_SEC)
+	g_debug("now[%d], now_prev[%d], lastCheck[%d]", now, now_prev, lastCheck);
+
+	if ((now - lastCheck > MIN_INTERVAL_BETWEEN_CHECKS_SEC) && ((0 == now_prev) || ((now - now_prev) > APPARENTLY_CRASHED_LAST_ATTEMPT)))
 	{
+		g_debug("It is time already");
 		return TRUE;
 	}
 	else
 	{
+		g_debug("It is not time yet");
 		return FALSE;
 	}
 
@@ -1040,18 +1061,13 @@ static gpointer download_thread(gpointer data)
         g_free(checksum.checksum_result);
         process_artifact_cleanup(artifact);
 		process_deployment_cleanup();
-/*
-        //software_ready_cb(&userdata);
-*/
-		force_exit = TRUE;
-
+		if_attempt_done = TRUE;
         return NULL;
 down_error:
         g_free(checksum.checksum_result);
         process_artifact_cleanup(artifact);
         process_deployment_cleanup();
-
-		force_exit = TRUE;
+		if_attempt_done = TRUE;
         return NULL;
 }
 
@@ -1121,6 +1137,7 @@ proc_error:
         // Lets cleanup processing deployment failed
         process_artifact_cleanup(artifact);
         process_deployment_cleanup();
+		if_attempt_done = TRUE;
         return FALSE;
 }
 
@@ -1142,13 +1159,14 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
         g_debug("#####cb");
         ClientData *data = user_data;
 
-		if (force_exit){
+		if (if_attempt_done){
+			attempt_done();
             data->res = 0;
             g_main_loop_quit(data->loop);
             return G_SOURCE_REMOVE;
         }
 
-        if (++last_run_sec < sleep_time)
+        if (++last_run_sec < sleep_time_sec)
                 return G_SOURCE_CONTINUE;
 
         last_run_sec = 0;
@@ -1198,14 +1216,13 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 
         if (status == 200) {
 			g_debug("Response status code: %d", status);
-			recordTime();
+			recordLastCheckTime();
+			sleep_time_sec = MAX_TIME;
             if (json_response_parser) {
                 // json_root is owned by the JsonParser and should never be modified or freed.
                 JsonNode *json_root = json_parser_get_root(json_response_parser);
                 g_autofree gchar *str = json_to_string(json_root, TRUE);
                 g_debug("Deployment response: %s\n", str);
-
-				sleep_time = MAX_TIME;
 
                 // get hawkbit sleep time (how often should we check for new software)
                 //hawkbit_interval_check_sec = json_get_sleeptime(json_root);
@@ -1216,25 +1233,19 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
                 g_object_unref(json_response_parser);
             }
 
-            if (error)
+            if (error) {
                     g_debug("process_deployment Error: %s", error->message);
-
-            sleep_time = LONG_MAX;
+            }
         }else if (status == 204) { // successfully connected back-end, no update needed.
             g_debug("Response status code: %d", status);
+			recordLastCheckTime();
             if (error) {
                 g_debug("HTTP Error: %s", error->message);
-				//sleep_time = CHECK_INTERVALS_SEC;
-//
-//						data->res = 13;
-//						g_main_loop_quit(data->loop);
-//						return G_SOURCE_REMOVE;
             }
-			recordTime();
-			exit(EXIT_FAILURE);
-//
+			if_attempt_done = TRUE;
+
         } else {
-        	exit(EXIT_FAILURE);
+        	if_attempt_done = TRUE;
         }
         g_clear_error(&error);
 
