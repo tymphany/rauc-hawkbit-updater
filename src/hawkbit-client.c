@@ -84,15 +84,36 @@ static GSourceFunc software_ready_cb;
 static long sleep_time_sec = 0;
 static long last_run_sec = 0;
 
+#define KEYS_CERT_IN_PERSISTENT
+#ifdef KEYS_CERT_IN_PERSISTENT
+static const char *pCertFile   = "/persist/factory/rauc-hawkbit-updater/client.crt";
+static const char *pCACertFile = "/persist/factory/rauc-hawkbit-updater/3rdparty_infra_cert_chain.pem";
+static const char *pKeyName    = "/persist/factory/rauc-hawkbit-updater/client.key";
+#else
 static const char *pCertFile   = "/etc/rauc-hawkbit-updater/ota_access/client.crt";
 static const char *pCACertFile = "/etc/rauc-hawkbit-updater/ota_access/3rdparty_infra_cert_chain.pem";
+static const char *pKeyName    = "/etc/rauc-hawkbit-updater/ota_access/client.key";
+#endif
 
-static const char *pKeyName = "/etc/rauc-hawkbit-updater/ota_access/client.key";
 static const char *pKeyType = "PEM";
 
 static gboolean checkPoints[FILE_DOWNLOAD_CHECKPOINTS_NUM] = {FALSE};
 
 static gboolean feedback_progress(const gchar *url, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, GError **error, const gchar *finalResult);
+
+static gboolean check_keys_certs()
+{
+	if ((access(pCertFile, 0)   == 0) 
+	&&  (access(pCACertFile, 0) == 0) 
+	&&  (access(pKeyName, 0)    == 0))	{
+		g_debug("All necessary certs or keys are present");
+		return TRUE;
+	}
+	else {
+		g_debug("Some certs or keys are missing");
+		return FALSE;
+	}
+}
 
 static void recordLastCheckTime()
 {
@@ -105,15 +126,71 @@ static void recordLastCheckTime()
 
 static gboolean attempt_done()
 {
-	//remove("/persist/factory/rauc-hawkbit-updater/now");
-	//return TRUE;
+	remove("/persist/factory/rauc-hawkbit-updater/now");
+	return TRUE;
 }
 
-static gboolean ifItIsAlreadyTime()
+static gboolean if_in_progress()
+{
+	size_t timeSec = 0;
+	size_t nowSec = 0;
+	char * temp = NULL;
+	FILE * fp;
+	size_t len = 0;
+	ssize_t read;
+
+	g_autofree gchar *msg = NULL;
+
+	msg = g_strdup_printf("date %s > /persist/factory/rauc-hawkbit-updater/time", "+%s");
+	system(msg);
+
+	fp = fopen("/persist/factory/rauc-hawkbit-updater/time", "r");
+	if (fp == NULL){
+		g_critical("cannot open time file");
+		return FALSE;
+	}
+
+	if ((read = getline(&temp, &len, fp)) != -1) {
+		timeSec = atoi(temp);
+		g_debug("timeSec |%d|", timeSec);
+	}
+
+	fclose(fp);
+	remove("/persist/factory/rauc-hawkbit-updater/time");
+
+	if( access("/persist/factory/rauc-hawkbit-updater/now", 0 ) == 0 ) {
+
+		fp = fopen("/persist/factory/rauc-hawkbit-updater/now", "r");
+		if (fp == NULL){
+			g_critical("cannot open now file");
+			return FALSE;
+		}
+
+		if ((read = getline(&temp, &len, fp)) != -1) {
+			nowSec = atoi(temp);
+			g_debug("nowSec |%d|", nowSec);
+		}
+
+		fclose(fp);
+
+		if ((timeSec - nowSec) > APPARENTLY_CRASHED_LAST_ATTEMPT) {
+			g_debug("Previous attempt apparently hanged");
+			return FALSE;
+		}
+		else {
+			g_debug("Previous attempt is in progress");
+			return TRUE;
+		}
+	}
+
+	g_debug("Previous attemot is not in progress");
+	return FALSE;
+}
+
+static gboolean if_already_time()
 {
 	FILE * fp;
 	size_t lastCheck = 0;
-	size_t now_prev = 0;
 	size_t now = 0;
 	char * temp = NULL;
 	size_t len = 0;
@@ -141,22 +218,6 @@ static gboolean ifItIsAlreadyTime()
 		g_debug("We do not have last check");
 		return TRUE;
 	}
-
-	if( access("/persist/factory/rauc-hawkbit-updater/now", 0 ) == 0 ) {
-
-		fp = fopen("/persist/factory/rauc-hawkbit-updater/now", "r");
-		if (fp == NULL){
-			g_critical("We have last atempt not finished but cannot open ota last attempt even though it exists");
-			return TRUE;
-		}
-
-		if ((read = getline(&temp, &len, fp)) != -1) {
-			now_prev = atoi(temp);
-			g_debug("We have last atempt not finished |%d|", now_prev);
-		}
-
-		fclose(fp);
-	}
 	
 	msg = g_strdup_printf("date %s > /persist/factory/rauc-hawkbit-updater/now", "+%s");
 	system(msg);
@@ -169,16 +230,14 @@ static gboolean ifItIsAlreadyTime()
 	
 	if ((read = getline(&temp, &len, fp)) != -1) {
 		now = atoi(temp);
-		g_debug("We have last atempt not finished |%d|", now);
+		g_debug("Now|%d|", now);
 	}
 	
 	fclose(fp);
 
 	g_debug("Seconds since last check passed %d", now - lastCheck);
 
-	g_debug("now[%d], now_prev[%d], lastCheck[%d]", now, now_prev, lastCheck);
-
-	if ((now - lastCheck > MIN_INTERVAL_BETWEEN_CHECKS_SEC) && ((0 == now_prev) || ((now - now_prev) > APPARENTLY_CRASHED_LAST_ATTEMPT)))
+	if ((now - lastCheck) > MIN_INTERVAL_BETWEEN_CHECKS_SEC)
 	{
 		g_debug("It is time already");
 		return TRUE;
@@ -323,7 +382,7 @@ static size_t get_fail_attempts()
 	}
 }
 
-static gboolean check_if_inprogress()
+static gboolean if_wait_for_last_step()
 {
 	if( access("/persist/factory/rauc-hawkbit-updater/inprogress", 0 ) == 0 ) {
 
@@ -1198,16 +1257,28 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 ///////////////////////////////////////////////
 		update_current_version();
 
-		if (TRUE == check_if_inprogress()){
-			data->res = 13;
+		if (TRUE == if_wait_for_last_step()){
+			data->res = 10;
 			g_main_loop_quit(data->loop);
 			return G_SOURCE_REMOVE;
 		}
 
-		if (FALSE == ifItIsAlreadyTime()){
-			data->res = 13;
+		if (TRUE == if_in_progress()) {
+			data->res = 11;
 			g_main_loop_quit(data->loop);
 			return G_SOURCE_REMOVE;
+		}
+
+		if (FALSE == if_already_time()){
+			data->res = 12;
+			g_main_loop_quit(data->loop);
+			return G_SOURCE_REMOVE;
+		}
+
+		if (FALSE == check_keys_certs()){
+			data->res = 13;
+			g_main_loop_quit(data->loop);
+			return G_SOURCE_REMOVE;	
 		}
 
 		g_debug("Checking for new software...get_tasks_url[%s]",get_tasks_url);
