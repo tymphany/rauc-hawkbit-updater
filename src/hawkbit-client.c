@@ -84,7 +84,7 @@ static GSourceFunc software_ready_cb;
 static long sleep_time_sec = 0;
 static long last_run_sec = 0;
 
-#define KEYS_CERT_IN_PERSISTENT
+//#define KEYS_CERT_IN_PERSISTENT
 #ifdef KEYS_CERT_IN_PERSISTENT
 static const char *pCertFile   = "/persist/factory/rauc-hawkbit-updater/client.crt";
 static const char *pCACertFile = "/persist/factory/rauc-hawkbit-updater/3rdparty_infra_cert_chain.pem";
