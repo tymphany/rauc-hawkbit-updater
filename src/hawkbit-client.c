@@ -115,25 +115,48 @@ static gboolean check_keys_certs()
 	}
 }
 
+size_t get_time() {
+    FILE *fp;
+	size_t time;
+    fp = popen("/etc/initscripts/board-operation/get_time.sh", "r");
+    if(fp != NULL) {
+        char temp[128];
+        fread(temp, sizeof(temp), 1, fp);
+		time = atoi(temp);
+    }
+
+	return time;
+}
+
 static void recordLastCheckTime()
 {
 	g_autofree gchar *msg = NULL;
 
-	msg = g_strdup_printf("date %s > /persist/factory/rauc-hawkbit-updater/lastCheck", "+%s");
+	msg = g_strdup_printf("echo %d > /persist/factory/rauc-hawkbit-updater/lastCheck", get_time());
 
 	system(msg);
 }
 
 static gboolean attempt_done()
 {
-	remove("/persist/factory/rauc-hawkbit-updater/now");
+	remove("/persist/factory/rauc-hawkbit-updater/attemptStart");
+	return TRUE;
+}
+
+static gboolean attempt_start()
+{
+	g_autofree gchar *msg = NULL;
+
+	msg = g_strdup_printf("echo %d > /persist/factory/rauc-hawkbit-updater/attemptStart", get_time());
+
+	system(msg);
 	return TRUE;
 }
 
 static gboolean if_in_progress()
 {
-	size_t timeSec = 0;
-	size_t nowSec = 0;
+	size_t attemptStart = 0;
+	size_t now = 0;
 	char * temp = NULL;
 	FILE * fp;
 	size_t len = 0;
@@ -141,44 +164,29 @@ static gboolean if_in_progress()
 
 	g_autofree gchar *msg = NULL;
 
-	msg = g_strdup_printf("date %s > /persist/factory/rauc-hawkbit-updater/time", "+%s");
-	system(msg);
+	if( access("/persist/factory/rauc-hawkbit-updater/attemptStart", 0 ) == 0 ) {
 
-	fp = fopen("/persist/factory/rauc-hawkbit-updater/time", "r");
-	if (fp == NULL){
-		g_critical("cannot open time file");
-		return FALSE;
-	}
-
-	if ((read = getline(&temp, &len, fp)) != -1) {
-		timeSec = atoi(temp);
-		g_debug("timeSec |%d|", timeSec);
-	}
-
-	fclose(fp);
-	remove("/persist/factory/rauc-hawkbit-updater/time");
-
-	if( access("/persist/factory/rauc-hawkbit-updater/now", 0 ) == 0 ) {
-
-		fp = fopen("/persist/factory/rauc-hawkbit-updater/now", "r");
+		fp = fopen("/persist/factory/rauc-hawkbit-updater/attemptStart", "r");
 		if (fp == NULL){
 			g_critical("cannot open now file");
 			return FALSE;
 		}
 
 		if ((read = getline(&temp, &len, fp)) != -1) {
-			nowSec = atoi(temp);
-			g_debug("nowSec |%d|", nowSec);
+			attemptStart = atoi(temp);
+			g_debug("attemptStart |%d|", attemptStart);
 		}
 
 		fclose(fp);
 
-		if ((timeSec - nowSec) > APPARENTLY_CRASHED_LAST_ATTEMPT) {
+		now = get_time();
+
+		if ((now - attemptStart) > APPARENTLY_CRASHED_LAST_ATTEMPT) {
 			g_debug("Previous attempt apparently hanged");
 			return FALSE;
 		}
 		else {
-			g_debug("Previous attempt is in progress");
+			g_debug("Previous attempt is in progress, seconds past (%d)", (now - attemptStart));
 			return TRUE;
 		}
 	}
@@ -219,23 +227,9 @@ static gboolean if_already_time()
 		return TRUE;
 	}
 	
-	msg = g_strdup_printf("date %s > /persist/factory/rauc-hawkbit-updater/now", "+%s");
-	system(msg);
-	
-	fp = fopen("/persist/factory/rauc-hawkbit-updater/now", "r");
-	if (fp == NULL){
-		g_critical("Cannot open now even though it exists");
-		return TRUE;
-	}
-	
-	if ((read = getline(&temp, &len, fp)) != -1) {
-		now = atoi(temp);
-		g_debug("Now|%d|", now);
-	}
-	
-	fclose(fp);
+	now = get_time();
 
-	g_debug("Seconds since last check passed %d", now - lastCheck);
+	g_debug("Seconds since last check passed %d", (now - lastCheck));
 
 	if ((now - lastCheck) > MIN_INTERVAL_BETWEEN_CHECKS_SEC)
 	{
@@ -1257,6 +1251,8 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 ///////////////////////////////////////////////
 		update_current_version();
 
+		//g_debug("result = %d", get_time());
+
 		if (TRUE == if_wait_for_last_step()){
 			data->res = 10;
 			g_main_loop_quit(data->loop);
@@ -1280,6 +1276,8 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 			g_main_loop_quit(data->loop);
 			return G_SOURCE_REMOVE;	
 		}
+
+		attempt_start();
 
 		g_debug("Checking for new software...get_tasks_url[%s]",get_tasks_url);
 
