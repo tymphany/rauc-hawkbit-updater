@@ -1314,6 +1314,7 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 			if_attempt_done = TRUE;
 
         } else {
+			g_debug("Response status code: %d", status);
         	if_attempt_done = TRUE;
         }
         g_clear_error(&error);
