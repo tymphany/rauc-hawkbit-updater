@@ -288,7 +288,7 @@ static gboolean get_certificate_against_chain_check_result()
 
 	string[fsize] = 0;
 
-	return (0 == strncmp(string, "signingCertificate.crt: OK", strlen("signingCertificate.crt: OK")));
+	return (0 == strncmp(string, "/etc/rauc-hawkbit-updater/signingCertificate.crt: OK", strlen("/etc/rauc-hawkbit-updater/signingCertificate.crt: OK")));
 }
 
 static gboolean get_signature_check_result()
@@ -994,18 +994,18 @@ static gpointer download_thread(gpointer data)
 	0. Save certificates and asignature to file system
 *//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-		msg = g_strdup_printf("echo \"%s\" > signed_digest_base64", artifact->signedDigest);
+		msg = g_strdup_printf("echo \"%s\" > /etc/rauc-hawkbit-updater/signed_digest_base64", artifact->signedDigest);
 		system(msg);
-		msg = g_strdup_printf("echo \"%s\" > signingCertificate.crt", artifact->signingCertificate);
+		msg = g_strdup_printf("echo \"%s\" > /etc/rauc-hawkbit-updater/signingCertificate.crt", artifact->signingCertificate);
 		system(msg);
-		msg = g_strdup_printf("echo \"%s\" > signingIntermediateCA.crt", artifact->signingIntermediateCA);
+		msg = g_strdup_printf("echo \"%s\" > /etc/rauc-hawkbit-updater/signingIntermediateCA.crt", artifact->signingIntermediateCA);
 		system(msg);
 
 /*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	1. Validating the authenticity of signingCertificate against signingIntermediateCA
 *//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-		msg = g_strdup_printf("openssl verify -verbose -CAfile signingIntermediateCA.crt signingCertificate.crt > /etc/rauc-hawkbit-updater/code_signing_cert_against_intermediate_result");
+		msg = g_strdup_printf("openssl verify -verbose -CAfile /etc/rauc-hawkbit-updater/signingIntermediateCA.crt /etc/rauc-hawkbit-updater/signingCertificate.crt > /etc/rauc-hawkbit-updater/code_signing_cert_against_intermediate_result");
 		system(msg);
 
 		if(!get_certificate_against_chain_check_result()) {
@@ -1025,7 +1025,7 @@ static gpointer download_thread(gpointer data)
 			goto down_error;
 		}
 
-		msg = g_strdup_printf("Validating the authenticity of signingCertificate against signingIntermediateCA failed but we will try again");
+		msg = g_strdup_printf("Validating the authenticity of signingCertificate against signingIntermediateCA SUCCESS");
 		g_debug("%s",msg);
 
 		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", msg, "", "", error, "");
@@ -1072,10 +1072,6 @@ static gpointer download_thread(gpointer data)
 		}
 
 		g_debug("Digital signature check SUCCESS");
-
-		g_free(checksum.checksum_result);
-        process_artifact_cleanup(artifact);
-		process_deployment_cleanup();
 
 		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 84, "Details", "Digital signature verification passed", "", "", error, "");
 		feedback_progress(artifact->status, "INSTALLING",85, "Details", "Memory bank flashing start", "", "", error, "");
@@ -1250,6 +1246,13 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 
 ///////////////////////////////////////////////
 		update_current_version();
+
+//		msg = g_strdup_printf("pwd > here");
+//		system(msg);
+//
+//		data->res = 9;
+//		g_main_loop_quit(data->loop);
+//		return G_SOURCE_REMOVE;
 
 		//g_debug("result = %d", get_time());
 
