@@ -1040,18 +1040,18 @@ static gpointer download_thread(gpointer data)
 	3. signingCertificate.crt -> code_signing_certificate_public_key.pem
 *//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	msg = g_strdup_printf("openssl x509 -pubkey -noout -in signingCertificate.crt > code_signing_certificate_public_key.pem");
+	msg = g_strdup_printf("openssl x509 -pubkey -noout -in /etc/rauc-hawkbit-updater/signingCertificate.crt > /etc/rauc-hawkbit-updater/code_signing_certificate_public_key.pem");
 	system(msg);
 
 /*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	4. Check signature
 *//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-		msg = g_strdup_printf("openssl dgst -sha256 -binary -out ota.raucb.bin.sha256 %s", hawkbit_config->bundle_download_location);
+		msg = g_strdup_printf("openssl dgst -sha256 -binary -out /etc/rauc-hawkbit-updater/ota.raucb.bin.sha256 %s", hawkbit_config->bundle_download_location);
 		system(msg);
-		msg = g_strdup_printf("base64 --decode signed_digest_base64 > signature.bin");
+		msg = g_strdup_printf("base64 --decode /etc/rauc-hawkbit-updater/signed_digest_base64 > /etc/rauc-hawkbit-updater/signature.bin");
 		system(msg);
-		msg = g_strdup_printf("openssl dgst -sha256 -verify code_signing_certificate_public_key.pem -signature signature.bin ota.raucb.bin.sha256 > /etc/rauc-hawkbit-updater/sig_check_result");
+		msg = g_strdup_printf("openssl dgst -sha256 -verify /etc/rauc-hawkbit-updater/code_signing_certificate_public_key.pem -signature /etc/rauc-hawkbit-updater/signature.bin /etc/rauc-hawkbit-updater/ota.raucb.bin.sha256 > /etc/rauc-hawkbit-updater/sig_check_result");
 		system(msg);
 
 		if (!get_signature_check_result()) {
