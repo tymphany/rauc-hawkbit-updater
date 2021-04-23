@@ -101,6 +101,49 @@ static gboolean checkPoints[FILE_DOWNLOAD_CHECKPOINTS_NUM] = {FALSE};
 
 static gboolean feedback_progress(const gchar *url, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, GError **error, const gchar *finalResult);
 
+static gboolean validateSigningIntermediateCAAgainstRootCA() {
+	 FILE *fp;
+	 size_t fsize;
+	 char cert[2048];
+	 char rootCert[2048];
+	 const char *d = "-----BEGIN CERTIFICATE-----";
+	 char *p;
+
+	 fp = fopen("/etc/rauc-hawkbit-updater/signingIntermediateCA.crt", "r");
+	 if(fp != NULL) {
+	 	
+		 fsize = fread(cert, 1, 2048, fp);
+
+		 g_debug("!!fsize[%d]", fsize);
+
+		 cert[fsize-1] = 0;
+		 //g_debug("!![%d][%s]", sizeof(cert), cert);
+
+		 p = strstr(cert+10, d);
+
+		 //g_debug("rootCA in intermediate [%d][%s]", (fsize-1), p);
+
+		 fclose(fp);
+	 }
+
+	 fp = fopen("/etc/rauc-hawkbit-updater/ota_access/rootCA.crt", "r");
+	 if(fp != NULL) {
+	 	
+		 fsize = fread(rootCert, 1, 2048, fp);
+		 //g_debug("rootCA in rootCA [%d][%s]", fsize, rootCert);
+
+		 fclose(fp);
+	 }
+
+	 if (0 == strcmp(p, rootCert)){
+	 	g_debug("validateSigningIntermediateCAAgainstRootCA: same");
+		return TRUE;
+	 }
+	 else{
+	 	g_debug("validateSigningIntermediateCAAgainstRootCA: not same");
+		return FALSE;
+	 }
+}
 static gboolean check_keys_certs()
 {
 	if ((access(pCertFile, 0)   == 0) 
@@ -1034,7 +1077,27 @@ static gpointer download_thread(gpointer data)
 	2. Verify rootCA included in signingIntermediateCA (it is the first cert in the chain (at the top)) against rootCA pinned in firmware. This is just a string comparison.
 *//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	//TODO
+	if (!validateSigningIntermediateCAAgainstRootCA()) {
+
+		fails = get_fail_attempts();
+	
+		if (fails >=2) {
+			msg = g_strdup_printf("Validating the authenticity of signingIntermediateCA against rootCA failed and we have reached an attempts limit. Stop campaign.");
+			reset_fail_attempts();
+			feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Intermediate Certificate", artifact->signingIntermediateCA, error, "FAIL");
+		} else {
+			msg = g_strdup_printf("Validating the authenticity of signingIntermediateCA against rootCA failed but we will try again");
+			set_fail_attempts(fails+1);
+			feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Intermediate Certificate", artifact->signingIntermediateCA, error, "");
+		}
+		g_critical("%s", msg);
+		goto down_error;
+	}
+	
+	msg = g_strdup_printf("Validating the authenticity of signingIntermediateCA against rootCA SUCCESS");
+	g_debug("%s",msg);
+	
+	feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", msg, "", "", error, "");
 
 /*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	3. signingCertificate.crt -> code_signing_certificate_public_key.pem
