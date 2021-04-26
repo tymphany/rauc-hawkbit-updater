@@ -1160,7 +1160,7 @@ static gpointer download_thread(gpointer data)
 
 		//sprintf(buf, "touch /etc/rauc-hawkbit-updater/inprogress");
 
-		msg = g_strdup_printf("mkdir -p /persist/factory/rauc-hawkbit-updater/", artifact->version, artifact->status);
+		msg = g_strdup_printf("mkdir -p /persist/factory/rauc-hawkbit-updater/");
 		system(msg);
 
 		msg = g_strdup_printf("echo \"%s\n%s\" > /persist/factory/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
