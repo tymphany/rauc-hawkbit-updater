@@ -1152,6 +1152,8 @@ static gpointer download_thread(gpointer data)
 		feedback_progress(artifact->status, "INSTALLING",86, "Details", "Memory bank flashing done", "", "", error, "");
 		feedback_progress(artifact->status, "PENDING_REBOOT", 87, "Details", "Now we wait for system reboot", "", "", error, "");
 
+		reset_fail_attempts();
+
 		//feedback_progress(artifact->status, "EXECUTING", 90, "", "", "", "", NULL, FALSE, "");
 		//feedback_progress(artifact->status, "INSTALLING",95, "", "", "", "", NULL, FALSE, "");
 		//feedback_progress(artifact->status, "SUCCESS",   100, "", "", "", "", NULL, TRUE, "SUCCESS");
