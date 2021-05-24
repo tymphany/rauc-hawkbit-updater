@@ -53,6 +53,9 @@
 #include "sd-helper.h"
 #endif
 
+#include <sys/time.h>
+//#include <stdio.h>
+
 #include "hawkbit-client.h"
 
 #define FILE_DOWNLOAD_CHECKPOINTS_NUM         (10)
@@ -60,14 +63,18 @@
 #define FILE_DOWNLOAD_CHECKPOINTS_PERCENT_STEP           (100 / FILE_DOWNLOAD_CHECKPOINTS_NUM)
 #define FILE_DOWNLOAD_ALL_IN_ALL_PERCENT_PER_CHECKPOINT (FILE_DOWNLOAD_DONE_ALL_IN_ALL_PERCENT / FILE_DOWNLOAD_CHECKPOINTS_NUM)
 #define MAX_TIME (0xFFFFFFFF)
+#define WAIT_DOWNLOAD_FINISH_MAX_TIME (60 * 1 * 1)// (60 * 60 * 2)
 #define CHECK_INTERVALS_SEC (30)
 #define MIN_INTERVAL_BETWEEN_CHECKS_SEC (60 * 60 * 24)
 #define APPARENTLY_CRASHED_LAST_ATTEMPT (60 * 60 * 24)
 
-gboolean volatile if_attempt_done = FALSE;
+typedef enum {
+    US_INIT     = 0,
+    US_DOWNLOAD = 1,
+    US_DONE     = 2,
+} UPGRADE_STATE;
 
-gboolean run_once = FALSE;
-gboolean volatile force_check_run = FALSE;
+volatile UPGRADE_STATE upgradeState = US_INIT;
 
 gchar   currentVersion[20] = "0.0.0";
 
@@ -81,18 +88,21 @@ static const char *HTTPMethod_STRING[] = {
 static struct config *hawkbit_config = NULL;
 static GSourceFunc software_ready_cb;
 //static gchar * volatile action_id = NULL;
-static long sleep_time_sec = 0;
-static long last_run_sec = 0;
+static size_t downloadStart = 0;
+
 
 //#define KEYS_CERT_IN_PERSISTENT
 #ifdef KEYS_CERT_IN_PERSISTENT
 static const char *pCertFile   = "/persist/factory/rauc-hawkbit-updater/client.crt";
 static const char *pCACertFile = "/persist/factory/rauc-hawkbit-updater/3rdparty_infra_cert_chain.pem";
 static const char *pKeyName    = "/persist/factory/rauc-hawkbit-updater/client.key";
+static const char *pRootCA     = "/persist/factory/rauc-hawkbit-updater/rootCA.crt";
 #else
 static const char *pCertFile   = "/etc/rauc-hawkbit-updater/ota_access/client.crt";
 static const char *pCACertFile = "/etc/rauc-hawkbit-updater/ota_access/3rdparty_infra_cert_chain.pem";
 static const char *pKeyName    = "/etc/rauc-hawkbit-updater/ota_access/client.key";
+static const char *pRootCA     = "/etc/rauc-hawkbit-updater/ota_access/rootCA.crt";
+
 #endif
 
 static const char *pKeyType = "PEM";
@@ -126,7 +136,7 @@ static gboolean validateSigningIntermediateCAAgainstRootCA() {
 		 fclose(fp);
 	 }
 
-	 fp = fopen("/etc/rauc-hawkbit-updater/ota_access/rootCA.crt", "r");
+	 fp = fopen(pRootCA, "r");
 	 if(fp != NULL) {
 	 	
 		 fsize = fread(rootCert, 1, 2048, fp);
@@ -148,8 +158,9 @@ static gboolean check_keys_certs()
 {
 	if ((access(pCertFile, 0)   == 0) 
 	&&  (access(pCACertFile, 0) == 0) 
-	&&  (access(pKeyName, 0)    == 0))	{
-		g_debug("All necessary certs or keys are present");
+	&&  (access(pKeyName, 0)    == 0)
+	&&  (access(pRootCA, 0)     == 0))	{
+		g_debug("All necessary certs and keys are present");
 		return TRUE;
 	}
 	else {
@@ -158,7 +169,7 @@ static gboolean check_keys_certs()
 	}
 }
 
-size_t get_time() {
+size_t get_time_legacy() {
     FILE *fp;
 	size_t time;
     fp = popen("/etc/initscripts/board-operation/get_time.sh", "r");
@@ -169,6 +180,13 @@ size_t get_time() {
     }
 
 	return time;
+}
+
+size_t get_time() {
+	struct timeval current_time;
+	gettimeofday(&current_time, NULL);
+
+	return current_time.tv_sec;	
 }
 
 static void recordLastCheckTime()
@@ -234,7 +252,7 @@ static gboolean if_in_progress()
 		}
 	}
 
-	g_debug("Previous attemot is not in progress");
+	g_debug("Previous attempt is not in progress");
 	return FALSE;
 }
 
@@ -266,7 +284,7 @@ static gboolean if_already_time()
 		fclose(fp);
 	}
 	else {
-		g_debug("We do not have last check");
+		g_debug("We do not have last check time stamp");
 		return TRUE;
 	}
 	
@@ -470,7 +488,7 @@ static gboolean if_wait_for_last_step()
 		return TRUE;
 	}
 	else {
-		g_debug("No update in progress, proceed to polling");
+		g_debug("We are not waiting for reboot to finilize previous upgrade");
 		return FALSE;
 	}
 }
@@ -1175,13 +1193,13 @@ static gpointer download_thread(gpointer data)
         g_free(checksum.checksum_result);
         process_artifact_cleanup(artifact);
 		process_deployment_cleanup();
-		if_attempt_done = TRUE;
+		upgradeState = US_DONE;
         return NULL;
 down_error:
         g_free(checksum.checksum_result);
         process_artifact_cleanup(artifact);
         process_deployment_cleanup();
-		if_attempt_done = TRUE;
+		upgradeState = US_DONE;
         return NULL;
 }
 
@@ -1251,7 +1269,7 @@ proc_error:
         // Lets cleanup processing deployment failed
         process_artifact_cleanup(artifact);
         process_deployment_cleanup();
-		if_attempt_done = TRUE;
+		upgradeState = US_DONE;
         return FALSE;
 }
 
@@ -1273,17 +1291,34 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
         g_debug("#####cb");
         ClientData *data = user_data;
 
-		if (if_attempt_done){
-			attempt_done();
-            data->res = 0;
-            g_main_loop_quit(data->loop);
-            return G_SOURCE_REMOVE;
-        }
+		switch(upgradeState){
+			case US_INIT:
+				g_debug("upgrade in init");
+				break;
+			case US_DOWNLOAD:
+				if ((get_time() - downloadStart) > WAIT_DOWNLOAD_FINISH_MAX_TIME){
+					g_debug("upgrade done due to timeout");
+					attempt_done();
+		            data->res = 0;
+		            g_main_loop_quit(data->loop);
+		            return G_SOURCE_REMOVE;					
+				}
+				else {
+					g_debug("upgrade in progress");
+					return G_SOURCE_CONTINUE;
+				}
+				break;
+			case US_DONE:
+				g_debug("upgrade is done");
+				attempt_done();
+	            data->res = 0;
+	            g_main_loop_quit(data->loop);
+	            return G_SOURCE_REMOVE;
+				break;
+			default:
+				break;
 
-        if (++last_run_sec < sleep_time_sec)
-                return G_SOURCE_CONTINUE;
-
-        last_run_sec = 0;
+		}
 
         // build hawkBit get tasks URL
         //g_autofree gchar *get_tasks_url = build_api_url("/%s/controller/v1/%s", hawkbit_config->tenant_id, hawkbit_config->controller_id);
@@ -1299,27 +1334,12 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 
 		size_t fails;
 
-//		set_fail_attempts(1);
-
 		fails = get_fail_attempts();
 
 		g_debug("So far fails count[%d]",fails);
 
-//		data->res = 13;
-//		g_main_loop_quit(data->loop);
-//		return G_SOURCE_REMOVE;
-
 ///////////////////////////////////////////////
 		update_current_version();
-
-//		msg = g_strdup_printf("pwd > here");
-//		system(msg);
-//
-//		data->res = 9;
-//		g_main_loop_quit(data->loop);
-//		return G_SOURCE_REMOVE;
-
-		//g_debug("result = %d", get_time());
 
 		if (TRUE == if_wait_for_last_step()){
 			data->res = 10;
@@ -1354,7 +1374,7 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
         if (status == 200) {
 			g_debug("Response status code: %d", status);
 			recordLastCheckTime();
-			sleep_time_sec = MAX_TIME;
+
             if (json_response_parser) {
                 // json_root is owned by the JsonParser and should never be modified or freed.
                 JsonNode *json_root = json_parser_get_root(json_response_parser);
@@ -1366,9 +1386,14 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
                 //long version = json_get_version(json_root);
                 //g_debug("version = %d", version);
 
+				upgradeState = US_DOWNLOAD;
+				downloadStart = get_time();
                 process_deployment(json_root, &error);
                 g_object_unref(json_response_parser);
             }
+			else{
+				upgradeState = US_DONE;
+			}
 
             if (error) {
                     g_debug("process_deployment Error: %s", error->message);
@@ -1379,11 +1404,11 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
             if (error) {
                 g_debug("HTTP Error: %s", error->message);
             }
-			if_attempt_done = TRUE;
+			upgradeState = US_DONE;
 
         } else {
 			g_debug("Response status code: %d", status);
-        	if_attempt_done = TRUE;
+        	upgradeState = US_DONE;
         }
         g_clear_error(&error);
 
@@ -1400,19 +1425,14 @@ int hawkbit_start_service_sync()
         ctx = g_main_context_new();
         cdata.loop = g_main_loop_new(ctx, FALSE);
 
-        g_debug("#####5");
-
         timeout_source = g_timeout_source_new(1000);   // pull every second
         g_source_set_name(timeout_source, "Add timeout");
         g_source_set_callback(timeout_source, (GSourceFunc) hawkbit_pull_cb, &cdata, NULL);
         g_source_attach(timeout_source, ctx);
         g_source_unref(timeout_source);
 
-        g_debug("#####6");
-
 #ifdef WITH_SYSTEMD
 
-        g_debug("#####7");
 
         GSource *event_source = NULL;
         sd_event *event = NULL;
@@ -1438,10 +1458,7 @@ int hawkbit_start_service_sync()
         sd_notify(0, "READY=1\nSTATUS=Init completed, start polling HawkBit for new software.");
 #endif
 
-        g_debug("#####8");
-
         g_main_loop_run(cdata.loop);
-        g_debug("#####9");
 
         res = cdata.res;
 
@@ -1449,22 +1466,17 @@ int hawkbit_start_service_sync()
         sd_notify(0, "STOPPING=1\nSTATUS=Stopped polling HawkBit for new software.");
 #endif
 
-        g_debug("#####10");
 #ifdef WITH_SYSTEMD
 finish:
-        g_debug("#####11");
         g_source_unref(event_source);
         g_source_destroy(event_source);
         sd_event_set_watchdog(event, FALSE);
         event = sd_event_unref(event);
 #endif
-        g_debug("#####12");
         g_main_loop_unref(cdata.loop);
         g_main_context_unref(ctx);
         if (res < 0)
                 g_warning("Failure: %s\n", strerror(-res));
-
-        g_debug("#####13");
 
         return res;
 }
