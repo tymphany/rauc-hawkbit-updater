@@ -427,7 +427,7 @@ static size_t get_fail_attempts()
 		fp = fopen("/persist/factory/rauc-hawkbit-updater/fails", "r");
 		if (fp == NULL){
 			g_critical("Cannot open fails file even though it exists");
-			exit(EXIT_FAILURE);
+			return failsCount;
 		}
 
 		if ((read = getline(&fails, &len, fp)) != -1) {
@@ -436,7 +436,7 @@ static size_t get_fail_attempts()
 		}
 		else {
 			g_critical("Cannot read fails count");
-			exit(EXIT_FAILURE);
+			return failsCount;
 		}
 		fclose(fp);
 
@@ -463,7 +463,8 @@ static gboolean if_wait_for_last_step()
 		fp = fopen("/persist/factory/rauc-hawkbit-updater/inprogress", "r");
 		if (fp == NULL){
 			g_critical("Cannot open inprogress file even though it exists");
-			exit(EXIT_FAILURE);
+			recordLastFailedTime("Cannot open inprogress file even though it exists");
+			return TRUE;
 		}
 
 		if ((read = getline(&version, &len, fp)) != -1) {
@@ -474,25 +475,33 @@ static gboolean if_wait_for_last_step()
 				g_debug("Update has been finalized, we report to server that it is done");
 
 				if ((read = getline(&statusUrl, &len, fp)) != -1) {
-								//printf("Retrieved line of length %zu:\n", read);
 
-								statusUrl[strlen(statusUrl)-1] = '\0';
+					//printf("Retrieved line of length %zu:\n", read);
+					statusUrl[strlen(statusUrl)-1] = '\0';
+
+					if (TRUE == feedback_progress(statusUrl, "SUCCESS",   100, "", "", "", "", NULL, "SUCCESS"))
+					{
+						remove("/persist/factory/rauc-hawkbit-updater/inprogress");
+						recordLastFailedTime("Last step is done, and reported to backend");
+					}
+					else
+					{
+						recordLastFailedTime("Cannot report last step to backend");
+					}
 				}
 				else {
 					g_critical("Cannot read statusUrls");
-					exit(EXIT_FAILURE);
+					recordLastFailedTime("Cannot read statusUrls");
 				}
-
-				feedback_progress(statusUrl, "SUCCESS",   100, "", "", "", "", NULL, "SUCCESS");
-				remove("/persist/factory/rauc-hawkbit-updater/inprogress");
 			}
 			else {
 				g_debug("Update has not been finilized, pending for reboot as a last step");
+				recordLastFailedTime("Update has not been finilized, pending for reboot as a last step");
 			}
 		}
 		else {
 			g_critical("Cannot read expected inprogress sw version");
-			exit(EXIT_FAILURE);
+			recordLastFailedTime("Cannot read expected inprogress sw version");
 		}
 		fclose(fp);
 
@@ -1356,7 +1365,7 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 
 		if (TRUE == if_wait_for_last_step()){
 			data->res = 10;
-			recordLastFailedTime("waiting for last step ");
+			//recordLastFailedTime("waiting for last step ");
 			g_main_loop_quit(data->loop);
 			return G_SOURCE_REMOVE;
 		}
@@ -1425,7 +1434,7 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 			recordLastFailedTime("successful check, no update needed ");
 			upgradeState = US_DONE;
 
-        } else { // not successfully connected back-end, need to try again.
+        } else { // could not successfully connect to back-end, need to try again.
 			g_debug("Response status code: %d", status);
 			recordLastFailedTime("Could not connect to backend");
         	upgradeState = US_DONE;
@@ -1500,4 +1509,5 @@ finish:
 
         return res;
 }
+
 
