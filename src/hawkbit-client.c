@@ -66,7 +66,7 @@
 #define WAIT_DOWNLOAD_FINISH_MAX_TIME (60 * 1 * 1)// (60 * 60 * 2)
 #define CHECK_INTERVALS_SEC (30)
 #define MIN_INTERVAL_BETWEEN_CHECKS_SEC (60 * 60 * 24)
-#define APPARENTLY_CRASHED_LAST_ATTEMPT (60 * 60 * 24)
+#define APPARENTLY_CRASHED_LAST_ATTEMPT (60 * 60 * 2)
 
 typedef enum {
     US_INIT     = 0,
@@ -187,6 +187,17 @@ size_t get_time() {
 	gettimeofday(&current_time, NULL);
 
 	return current_time.tv_sec;	
+}
+
+static void recordLastFailedTime(char * message)
+{
+	g_autofree gchar *msg = NULL;
+
+	msg = g_strdup_printf("date > /persist/factory/rauc-hawkbit-updater/lastFailed");
+	system(msg);
+
+	msg = g_strdup_printf("echo %s >> /persist/factory/rauc-hawkbit-updater/lastFailed", message);
+	system(msg);
 }
 
 static void recordLastCheckTime()
@@ -1193,6 +1204,7 @@ static gpointer download_thread(gpointer data)
         g_free(checksum.checksum_result);
         process_artifact_cleanup(artifact);
 		process_deployment_cleanup();
+		recordLastFailedTime("successfully flashed ");
 		upgradeState = US_DONE;
         return NULL;
 down_error:
@@ -1299,6 +1311,7 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 				if ((get_time() - downloadStart) > WAIT_DOWNLOAD_FINISH_MAX_TIME){
 					g_debug("upgrade done due to timeout");
 					attempt_done();
+					recordLastFailedTime("timeout ");
 		            data->res = 0;
 		            g_main_loop_quit(data->loop);
 		            return G_SOURCE_REMOVE;					
@@ -1343,24 +1356,28 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 
 		if (TRUE == if_wait_for_last_step()){
 			data->res = 10;
+			recordLastFailedTime("waiting for last step ");
 			g_main_loop_quit(data->loop);
 			return G_SOURCE_REMOVE;
 		}
 
 		if (TRUE == if_in_progress()) {
 			data->res = 11;
+			recordLastFailedTime("previous is in progress ");
 			g_main_loop_quit(data->loop);
 			return G_SOURCE_REMOVE;
 		}
 
 		if (FALSE == if_already_time()){
 			data->res = 12;
+			recordLastFailedTime("not time yet ");
 			g_main_loop_quit(data->loop);
 			return G_SOURCE_REMOVE;
 		}
 
 		if (FALSE == check_keys_certs()){
 			data->res = 13;
+			recordLastFailedTime("cert Missing ");
 			g_main_loop_quit(data->loop);
 			return G_SOURCE_REMOVE;	
 		}
@@ -1392,6 +1409,7 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
                 g_object_unref(json_response_parser);
             }
 			else{
+				recordLastFailedTime("could not parse jason ");
 				upgradeState = US_DONE;
 			}
 
@@ -1404,10 +1422,12 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
             if (error) {
                 g_debug("HTTP Error: %s", error->message);
             }
+			recordLastFailedTime("successful check, no update needed ");
 			upgradeState = US_DONE;
 
-        } else {
+        } else { // not successfully connected back-end, need to try again.
 			g_debug("Response status code: %d", status);
+			recordLastFailedTime("Could not connect to backend");
         	upgradeState = US_DONE;
         }
         g_clear_error(&error);
