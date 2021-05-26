@@ -320,9 +320,16 @@ static void send_wait_for_reboot_message()
 {
 	g_autofree gchar *msg = NULL;
 
-	//adk-message-send 'connectivity_wifi_enable {}'
-
 	msg = g_strdup_printf("adk-message-send 'system_mode_management {name:\"ota::Wait4Reboot\"}'");
+	//sprintf(buf, "echo %s > signed_digest_base64", artifact->signedDigest);
+	system(msg);
+}
+
+static void send_ota_fully_done_message()
+{
+	g_autofree gchar *msg = NULL;
+
+	msg = g_strdup_printf("adk-message-send 'system_mode_management {name:\"ota::FullyDone\"}'");
 	//sprintf(buf, "echo %s > signed_digest_base64", artifact->signedDigest);
 	system(msg);
 }
@@ -483,6 +490,7 @@ static gboolean if_wait_for_last_step()
 					{
 						remove("/persist/factory/rauc-hawkbit-updater/inprogress");
 						recordLastFailedTime("Last step is done, and reported to backend");
+						send_ota_fully_done_message();
 					}
 					else
 					{
@@ -626,7 +634,10 @@ static gboolean get_binary(const gchar* download_url, const gchar* file, gint64 
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &gb);
    //     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, hawkbit_config->ssl_verify ? 1L : 0L);
    //     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, hawkbit_config->ssl_verify ? 1L : 0L);
-        //curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 1L);
+
+   //curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
         /* abort if slower than 100 bytes/sec during 60 seconds */
   //      curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 60L);
   //      curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 100L);
