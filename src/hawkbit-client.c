@@ -63,10 +63,12 @@
 #define FILE_DOWNLOAD_CHECKPOINTS_PERCENT_STEP           (100 / FILE_DOWNLOAD_CHECKPOINTS_NUM)
 #define FILE_DOWNLOAD_ALL_IN_ALL_PERCENT_PER_CHECKPOINT (FILE_DOWNLOAD_DONE_ALL_IN_ALL_PERCENT / FILE_DOWNLOAD_CHECKPOINTS_NUM)
 #define MAX_TIME (0xFFFFFFFF)
-#define WAIT_DOWNLOAD_FINISH_MAX_TIME (60 * 1 * 1)// (60 * 60 * 2)
+#define WAIT_DOWNLOAD_FINISH_MAX_TIME (60 * 60 * 2)
 #define CHECK_INTERVALS_SEC (30)
 #define MIN_INTERVAL_BETWEEN_CHECKS_SEC (60 * 60 * 24)
 #define APPARENTLY_CRASHED_LAST_ATTEMPT (60 * 60 * 2)
+
+//#define SKIP_DOWNLOAD
 
 typedef enum {
     US_INIT     = 0,
@@ -90,20 +92,20 @@ static GSourceFunc software_ready_cb;
 //static gchar * volatile action_id = NULL;
 static size_t downloadStart = 0;
 
+static const char *PpCertFile   = "/persist/factory/rauc-hawkbit-updater/client.crt";
+static const char *PpCACertFile = "/persist/factory/rauc-hawkbit-updater/3rdparty_infra_cert_chain.pem";
+static const char *PpKeyName    = "/persist/factory/rauc-hawkbit-updater/client.key";
+static const char *PpRootCA     = "/persist/factory/rauc-hawkbit-updater/rootCA.crt";
 
-//#define KEYS_CERT_IN_PERSISTENT
-#ifdef KEYS_CERT_IN_PERSISTENT
-static const char *pCertFile   = "/persist/factory/rauc-hawkbit-updater/client.crt";
-static const char *pCACertFile = "/persist/factory/rauc-hawkbit-updater/3rdparty_infra_cert_chain.pem";
-static const char *pKeyName    = "/persist/factory/rauc-hawkbit-updater/client.key";
-static const char *pRootCA     = "/persist/factory/rauc-hawkbit-updater/rootCA.crt";
-#else
-static const char *pCertFile   = "/etc/rauc-hawkbit-updater/ota_access/client.crt";
-static const char *pCACertFile = "/etc/rauc-hawkbit-updater/ota_access/3rdparty_infra_cert_chain.pem";
-static const char *pKeyName    = "/etc/rauc-hawkbit-updater/ota_access/client.key";
-static const char *pRootCA     = "/etc/rauc-hawkbit-updater/ota_access/rootCA.crt";
+static const char *FpCertFile   = "/etc/rauc-hawkbit-updater/ota_access/client.crt";
+static const char *FpCACertFile = "/etc/rauc-hawkbit-updater/ota_access/3rdparty_infra_cert_chain.pem";
+static const char *FpKeyName    = "/etc/rauc-hawkbit-updater/ota_access/client.key";
+static const char *FpRootCA     = "/etc/rauc-hawkbit-updater/ota_access/rootCA.crt";
 
-#endif
+static const char *pCertFile;
+static const char *pCACertFile;
+static const char *pKeyName;
+static const char *pRootCA;
 
 static const char *pKeyType = "PEM";
 
@@ -111,10 +113,21 @@ static gboolean checkPoints[FILE_DOWNLOAD_CHECKPOINTS_NUM] = {FALSE};
 
 static gboolean feedback_progress(const gchar *url, const gchar *state, gint progress, const gchar *value1_name, const gchar *value1, const gchar *value2_name, const gchar *value2, GError **error, const gchar *finalResult);
 
+char * lastStrstr(const char * haystack,const char * needle){
+    char * temp = haystack;
+	char * before = 0;
+	
+    while (temp = strstr(temp,needle)){ 
+		before = temp++;
+    }
+
+    return before;
+}
+
 static gboolean validateSigningIntermediateCAAgainstRootCA() {
 	 FILE *fp;
 	 size_t fsize;
-	 char cert[2048];
+	 char cert[4096];
 	 char rootCert[2048];
 	 const char *d = "-----BEGIN CERTIFICATE-----";
 	 char *p;
@@ -122,16 +135,15 @@ static gboolean validateSigningIntermediateCAAgainstRootCA() {
 	 fp = fopen("/etc/rauc-hawkbit-updater/signingIntermediateCA.crt", "r");
 	 if(fp != NULL) {
 	 	
-		 fsize = fread(cert, 1, 2048, fp);
-
-		 g_debug("!!fsize[%d]", fsize);
+		 fsize = fread(cert, 1, 4096, fp);
 
 		 cert[fsize-1] = 0;
-		 //g_debug("!![%d][%s]", sizeof(cert), cert);
+		 g_debug("signingIntermediateCA[%d][%s]", fsize, cert);
 
-		 p = strstr(cert+10, d);
+		 //p = strstr(cert+10, d);
+		 p = lastStrstr(cert, d);
 
-		 //g_debug("rootCA in intermediate [%d][%s]", (fsize-1), p);
+		 g_debug("rootCA in intermediate [%s]", p);
 
 		 fclose(fp);
 	 }
@@ -140,9 +152,15 @@ static gboolean validateSigningIntermediateCAAgainstRootCA() {
 	 if(fp != NULL) {
 	 	
 		 fsize = fread(rootCert, 1, 2048, fp);
-		 //g_debug("rootCA in rootCA [%d][%s]", fsize, rootCert);
+		 g_debug("rootCA in rootCA [%d][%s]", fsize, rootCert);
 
 		 fclose(fp);
+	 }
+
+	 if (NULL == p)
+	 {
+		g_debug("validateSigningIntermediateCAAgainstRootCA: cannot extract rootCA from signingIntermediateCA.crt");
+	 	return FALSE;
 	 }
 
 	 if (0 == strcmp(p, rootCert)){
@@ -156,11 +174,28 @@ static gboolean validateSigningIntermediateCAAgainstRootCA() {
 }
 static gboolean check_keys_certs()
 {
-	if ((access(pCertFile, 0)   == 0) 
-	&&  (access(pCACertFile, 0) == 0) 
-	&&  (access(pKeyName, 0)    == 0)
-	&&  (access(pRootCA, 0)     == 0))	{
-		g_debug("All necessary certs and keys are present");
+	if ((access(PpCertFile, 0)   == 0) 
+	&&  (access(PpCACertFile, 0) == 0) 
+	&&  (access(PpKeyName, 0)    == 0)
+	&&  (access(PpRootCA, 0)     == 0))
+	{
+		pCertFile   = PpCertFile;
+		pCACertFile = PpCACertFile;
+		pKeyName    = PpKeyName;
+		pRootCA     = PpRootCA;
+		g_debug("All necessary certs and keys are present in persist");
+		return TRUE;
+	} 
+	else if ((access(FpCertFile, 0)   == 0) 
+	&&       (access(FpCACertFile, 0) == 0) 
+	&&       (access(FpKeyName, 0)    == 0)
+	&&       (access(FpRootCA, 0)     == 0))
+	{
+		pCertFile   = FpCertFile;
+		pCACertFile = FpCACertFile;
+		pKeyName    = FpKeyName;
+		pRootCA     = FpRootCA;
+		g_debug("All necessary certs and keys are present in file system");
 		return TRUE;
 	}
 	else {
@@ -566,7 +601,7 @@ static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct
 
 		percentage = (double) data->written / data->filesize * 100;
 
-        g_debug("curl_write_to_file_cb: bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
+        g_debug("bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
 
 		for (int ii = 9; ii >= 0; ii--)
 		{
@@ -1027,8 +1062,13 @@ static gpointer download_thread(gpointer data)
         // Download software bundle (artifact)
         gint64 start_time = g_get_monotonic_time();
         gint status = 0;
+
+#ifndef SKIP_DOWNLOAD		
         gboolean res = get_binary(artifact->downloadUrl, hawkbit_config->bundle_download_location,
                                   artifact->size, &checksum, &status, &error, artifact->status);
+#else
+		gboolean res = TRUE;
+#endif
         gint64 end_time = g_get_monotonic_time();
 
         if (!res) {
@@ -1051,6 +1091,7 @@ static gpointer download_thread(gpointer data)
 
 		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 80, "Details", "Starting file validating procedure", "", "", error, "");
 
+#ifndef SKIP_DOWNLOAD	
         // validate checksum
         if (g_strcmp0(artifact->sha256, checksum.checksum_result)) {
 			g_autofree gchar *msgDetails = NULL;
@@ -1075,7 +1116,7 @@ static gpointer download_thread(gpointer data)
             g_critical("%s", msg);
             goto down_error;
         }
-
+#endif
 
 		msg = g_strdup_printf("Checksum check passed");
 		g_debug("%s",msg);
@@ -1231,6 +1272,7 @@ down_error:
         g_free(checksum.checksum_result);
         process_artifact_cleanup(artifact);
         process_deployment_cleanup();
+		recordLastFailedTime("not successfully flashed ");
 		upgradeState = US_DONE;
         return NULL;
 }
@@ -1301,6 +1343,7 @@ proc_error:
         // Lets cleanup processing deployment failed
         process_artifact_cleanup(artifact);
         process_deployment_cleanup();
+		recordLastFailedTime("deployment fail ");
 		upgradeState = US_DONE;
         return FALSE;
 }
@@ -1320,7 +1363,6 @@ typedef struct ClientData_ {
 
 static gboolean hawkbit_pull_cb(gpointer user_data)
 {
-        g_debug("#####cb");
         ClientData *data = user_data;
 
 		switch(upgradeState){
