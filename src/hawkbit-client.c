@@ -172,8 +172,8 @@ static gboolean validateSigningIntermediateCAAgainstRootCA() {
 	 } else{
 	 	g_debug("validateSigningIntermediateCAAgainstRootCA: not same");
 #ifdef SKIP_ROOT_CA_VERIFICATION
-		 return TRUE;
-#elif
+		return TRUE;
+#else
 		return FALSE;
 #endif
 	 }
