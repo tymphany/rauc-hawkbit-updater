@@ -69,6 +69,9 @@
 #define APPARENTLY_CRASHED_LAST_ATTEMPT (60 * 60 * 2)
 
 //#define SKIP_DOWNLOAD
+//#define SKIP_ROOT_CA_VERIFICATION
+#define REMOVE_BUNLDE_AFTER_OTA
+#define REPORT_FINAL_STATE
 
 typedef enum {
     US_INIT     = 0,
@@ -166,10 +169,13 @@ static gboolean validateSigningIntermediateCAAgainstRootCA() {
 	 if (0 == strcmp(p, rootCert)){
 	 	g_debug("validateSigningIntermediateCAAgainstRootCA: same");
 		return TRUE;
-	 }
-	 else{
+	 } else{
 	 	g_debug("validateSigningIntermediateCAAgainstRootCA: not same");
+#ifdef SKIP_ROOT_CA_VERIFICATION
+		 return TRUE;
+#elif
 		return FALSE;
+#endif
 	 }
 }
 static gboolean check_keys_certs()
@@ -890,8 +896,10 @@ static void json_build_status(JsonBuilder *builder, const gchar *state, gint pro
 			        json_builder_set_member_name(builder, "progress");
 			        json_builder_add_int_value(builder, progress);
 					if (0 != strcmp(finalResult,"")) {
+#ifdef REPORT_FINAL_STATE
 						json_builder_set_member_name(builder, "final");
 			        	json_builder_add_string_value(builder, finalResult);
+#endif
 					}
 					json_builder_set_member_name(builder, "details");
 					json_builder_begin_object(builder);
@@ -1029,16 +1037,18 @@ static void process_artifact_cleanup(struct artifact *artifact)
 
 static void process_deployment_cleanup()
 {
-        //g_clear_pointer(action_id, g_free);
-        //gpointer ptr = action_id;
-        //action_id = NULL;
-       // g_free(ptr);
+    //g_clear_pointer(action_id, g_free);
+    //gpointer ptr = action_id;
+    //action_id = NULL;
+   // g_free(ptr);
 
-        if (g_file_test(hawkbit_config->bundle_download_location, G_FILE_TEST_EXISTS)) {
-                if (g_remove(hawkbit_config->bundle_download_location) != 0) {
-                        g_critical("Failed to delete file: %s", hawkbit_config->bundle_download_location);
-                }
-        }
+#ifdef REMOVE_BUNLDE_AFTER_OTA
+    if (g_file_test(hawkbit_config->bundle_download_location, G_FILE_TEST_EXISTS)) {
+            if (g_remove(hawkbit_config->bundle_download_location) != 0) {
+                    g_critical("Failed to delete file: %s", hawkbit_config->bundle_download_location);
+            }
+    }
+#endif
 }
 
 static gpointer download_thread(gpointer data)
@@ -1562,5 +1572,6 @@ finish:
 
         return res;
 }
+
 
 
