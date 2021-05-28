@@ -1058,18 +1058,18 @@ static void process_deployment_cleanup()
 #ifdef REMOVE_TEMP_FILES_AFTER_OTA
 		g_autofree gchar *msg = NULL;
 
-		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/signed_digest_base64", artifact->signedDigest);
+		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/signed_digest_base64");
 		system(msg);
-		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/signingCertificate.crt", artifact->signingCertificate);
+		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/signingCertificate.crt");
 		system(msg);
-		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/signingIntermediateCA.crt", artifact->signingIntermediateCA);
+		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/signingIntermediateCA.crt");
 		system(msg);
 
-		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/code_signing_cert_against_intermediate_result", artifact->signingIntermediateCA);
+		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/code_signing_cert_against_intermediate_result");
 		system(msg);
-		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/code_signing_certificate_public_key.pem", artifact->signingIntermediateCA);
+		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/code_signing_certificate_public_key.pem");
 		system(msg);
-		msg = g_strdup_printf("rm  /etc/rauc-hawkbit-updater/sig_check_result", artifact->signingIntermediateCA);
+		msg = g_strdup_printf("rm  /etc/rauc-hawkbit-updater/sig_check_result");
 		system(msg);
 #endif
 
