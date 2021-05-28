@@ -71,6 +71,7 @@
 //#define SKIP_DOWNLOAD
 //#define SKIP_ROOT_CA_VERIFICATION
 #define REMOVE_BUNLDE_AFTER_OTA
+#define REMOVE_TEMP_FILES_AFTER_OTA
 #define REPORT_FINAL_STATE
 
 typedef enum {
@@ -128,55 +129,60 @@ char * lastStrstr(const char * haystack,const char * needle){
 }
 
 static gboolean validateSigningIntermediateCAAgainstRootCA() {
-	 FILE *fp;
-	 size_t fsize;
-	 char cert[4096];
-	 char rootCert[2048];
-	 const char *d = "-----BEGIN CERTIFICATE-----";
-	 char *p;
+	FILE *fp;
+	size_t fsize;
+	char cert[4096];
+	char rootCert[2048];
+	const char *d = "-----BEGIN CERTIFICATE-----";
+	char *p;
 
-	 fp = fopen("/etc/rauc-hawkbit-updater/signingIntermediateCA.crt", "r");
-	 if(fp != NULL) {
+	fp = fopen("/etc/rauc-hawkbit-updater/signingIntermediateCA.crt", "r");
+	if(fp != NULL) {
 	 	
-		 fsize = fread(cert, 1, 4096, fp);
+		fsize = fread(cert, 1, 4096, fp);
 
-		 cert[fsize-1] = 0;
-		 g_debug("signingIntermediateCA[%d][%s]", fsize, cert);
+		cert[fsize-1] = 0;
+		g_debug("signingIntermediateCA[%d][%s]", fsize, cert);
 
-		 //p = strstr(cert+10, d);
-		 p = lastStrstr(cert, d);
+		//p = strstr(cert+10, d);
+		p = lastStrstr(cert, d);
 
-		 g_debug("rootCA in intermediate [%s]", p);
+		g_debug("rootCA in intermediate [%s]", p);
 
-		 fclose(fp);
-	 }
+		fclose(fp);
+	}
 
-	 fp = fopen(pRootCA, "r");
-	 if(fp != NULL) {
+	fp = fopen(pRootCA, "r");
+	if(fp != NULL) {
 	 	
-		 fsize = fread(rootCert, 1, 2048, fp);
-		 g_debug("rootCA in rootCA [%d][%s]", fsize, rootCert);
+		fsize = fread(rootCert, 1, 2048, fp);
+		g_debug("rootCA in rootCA [%d][%s]", fsize, rootCert);
 
-		 fclose(fp);
-	 }
+		fclose(fp);
+	}
 
-	 if (NULL == p)
-	 {
+	if (NULL == p)
+	{
 		g_debug("validateSigningIntermediateCAAgainstRootCA: cannot extract rootCA from signingIntermediateCA.crt");
-	 	return FALSE;
-	 }
-
-	 if (0 == strcmp(p, rootCert)){
-	 	g_debug("validateSigningIntermediateCAAgainstRootCA: same");
+#ifdef SKIP_ROOT_CA_VERIFICATION
 		return TRUE;
-	 } else{
+#else
+		return FALSE;
+#endif
+
+	}
+
+	if (0 == strcmp(p, rootCert)){
+		g_debug("validateSigningIntermediateCAAgainstRootCA: same");
+		return TRUE;
+	} else{
 	 	g_debug("validateSigningIntermediateCAAgainstRootCA: not same");
 #ifdef SKIP_ROOT_CA_VERIFICATION
 		return TRUE;
 #else
 		return FALSE;
 #endif
-	 }
+	}
 }
 static gboolean check_keys_certs()
 {
@@ -1049,6 +1055,24 @@ static void process_deployment_cleanup()
             }
     }
 #endif
+#ifdef REMOVE_TEMP_FILES_AFTER_OTA
+		g_autofree gchar *msg = NULL;
+
+		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/signed_digest_base64", artifact->signedDigest);
+		system(msg);
+		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/signingCertificate.crt", artifact->signingCertificate);
+		system(msg);
+		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/signingIntermediateCA.crt", artifact->signingIntermediateCA);
+		system(msg);
+
+		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/code_signing_cert_against_intermediate_result", artifact->signingIntermediateCA);
+		system(msg);
+		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/code_signing_certificate_public_key.pem", artifact->signingIntermediateCA);
+		system(msg);
+		msg = g_strdup_printf("rm  /etc/rauc-hawkbit-updater/sig_check_result", artifact->signingIntermediateCA);
+		system(msg);
+#endif
+
 }
 
 static gpointer download_thread(gpointer data)
