@@ -41,6 +41,7 @@ static gchar *config_file          = NULL;
 static gboolean opt_version        = FALSE;
 static gboolean opt_debug          = FALSE;
 static gboolean opt_run_once       = FALSE;
+static gboolean opt_forced         = FALSE;
 static gboolean opt_output_systemd = FALSE;
 
 // Commandline options
@@ -50,6 +51,7 @@ static GOptionEntry entries[] =
         { "version",          'v', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,     &opt_version,           "Version information",                      NULL },
         { "debug",            'd', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,     &opt_debug,             "Enable debug output",                      NULL },
         { "run-once",         'r', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,     &opt_run_once,          "Check and install new software and exit",  NULL },
+        { "forced",           'f', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,     &opt_forced,            "Forced run",  							  NULL },
 #ifdef WITH_SYSTEMD
         { "output-systemd",   's', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,     &opt_output_systemd,    "Enable output to systemd",                 NULL },
 #endif
@@ -158,6 +160,12 @@ int main(int argc, char **argv)
                 exit_code = 4;
                 goto out;
         }
+
+		if (opt_forced){
+			g_autofree gchar *msg = NULL;
+			msg = g_strdup_printf("rm /persist/factory/rauc-hawkbit-updater/*");
+			system(msg);
+		}
 
         if (opt_debug) {
                 log_level = G_LOG_LEVEL_MASK;
