@@ -70,7 +70,7 @@
 
 //#define PRINT_REQUESTS
 //#define SKIP_DOWNLOAD
-//#define SKIP_ROOT_CA_VERIFICATION
+
 #define REMOVE_BUNLDE_AFTER_OTA
 #define REMOVE_TEMP_FILES_AFTER_OTA
 #define REPORT_FINAL_STATE
@@ -144,7 +144,7 @@ static gboolean createRootCA() {
 	const char *d = "-----BEGIN CERTIFICATE-----";
 	char *p;
 
-	fp = fopen("/etc/rauc-hawkbit-updater/rootCA.crt", "w+");
+	fp = fopen("/persist/factory/rauc-hawkbit-updater/rootCA.crt", "w+");
 	if(fp != NULL) {
 
 	   fprintf(fp,"%s",rootCAcert);
@@ -153,7 +153,7 @@ static gboolean createRootCA() {
 
 	g_autofree gchar *msg = NULL;
 
-	msg = g_strdup_printf("dos2unix /etc/rauc-hawkbit-updater/rootCA.crt");
+	msg = g_strdup_printf("dos2unix /persist/factory/rauc-hawkbit-updater/rootCA.crt");
 	system(msg);
 }
 
@@ -980,18 +980,18 @@ static void process_deployment_cleanup()
 #ifdef REMOVE_TEMP_FILES_AFTER_OTA
 		g_autofree gchar *msg = NULL;
 
-		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/signed_digest_base64");
+		msg = g_strdup_printf("rm /persist/factory/rauc-hawkbit-updater/signed_digest_base64");
 		system(msg);
-		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/signingCertificate.crt");
+		msg = g_strdup_printf("rm /persist/factory/rauc-hawkbit-updater/signingCertificate.crt");
 		system(msg);
-		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/signingIntermediateCA.crt");
+		msg = g_strdup_printf("rm /persist/factory/rauc-hawkbit-updater/signingIntermediateCA.crt");
 		system(msg);
 
-		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/code_signing_cert_against_intermediate_result");
+		msg = g_strdup_printf("rm /persist/factory/rauc-hawkbit-updater/code_signing_cert_against_intermediate_result");
 		system(msg);
-		msg = g_strdup_printf("rm /etc/rauc-hawkbit-updater/code_signing_certificate_public_key.pem");
+		msg = g_strdup_printf("rm /persist/factory/rauc-hawkbit-updater/code_signing_certificate_public_key.pem");
 		system(msg);
-		msg = g_strdup_printf("rm  /etc/rauc-hawkbit-updater/sig_check_result");
+		msg = g_strdup_printf("rm  /persist/factory/rauc-hawkbit-updater/sig_check_result");
 		system(msg);
 #endif
 
@@ -1085,18 +1085,18 @@ static gpointer download_thread(gpointer data)
 	0. Save certificates and asignature to file system
 *//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-		msg = g_strdup_printf("echo \"%s\" > /etc/rauc-hawkbit-updater/signed_digest_base64", artifact->signedDigest);
+		msg = g_strdup_printf("echo \"%s\" > /persist/factory/rauc-hawkbit-updater/signed_digest_base64", artifact->signedDigest);
 		system(msg);
-		msg = g_strdup_printf("echo \"%s\" > /etc/rauc-hawkbit-updater/signingCertificate.crt", artifact->signingCertificate);
+		msg = g_strdup_printf("echo \"%s\" > /persist/factory/rauc-hawkbit-updater/signingCertificate.crt", artifact->signingCertificate);
 		system(msg);
-		msg = g_strdup_printf("echo \"%s\" > /etc/rauc-hawkbit-updater/signingIntermediateCA.crt", artifact->signingIntermediateCA);
+		msg = g_strdup_printf("echo \"%s\" > /persist/factory/rauc-hawkbit-updater/signingIntermediateCA.crt", artifact->signingIntermediateCA);
 		system(msg);
 
 /*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	1. Validating the authenticity of signingCertificate against signingIntermediateCA
 *//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-		msg = g_strdup_printf("openssl verify -partial_chain -verbose -CAfile /etc/rauc-hawkbit-updater/signingIntermediateCA.crt /etc/rauc-hawkbit-updater/signingCertificate.crt");
+		msg = g_strdup_printf("openssl verify -partial_chain -verbose -CAfile /persist/factory/rauc-hawkbit-updater/signingIntermediateCA.crt /persist/factory/rauc-hawkbit-updater/signingCertificate.crt");
 
 		FILE *fp;
 		char result[1024];
@@ -1107,7 +1107,7 @@ static gpointer download_thread(gpointer data)
 
 		pclose(fp);
 
-		if (0 != strncmp(result, "/etc/rauc-hawkbit-updater/signingCertificate.crt: OK", strlen("/etc/rauc-hawkbit-updater/signingCertificate.crt: OK"))){
+		if (0 != strncmp(result, "/persist/factory/rauc-hawkbit-updater/signingCertificate.crt: OK", strlen("/persist/factory/rauc-hawkbit-updater/signingCertificate.crt: OK"))){
 			fails = get_fail_attempts();
 
 			if (fails >=2) {
@@ -1135,15 +1135,17 @@ static gpointer download_thread(gpointer data)
 
 	createRootCA();
 
-	msg = g_strdup_printf("openssl verify -verbose -CAfile /etc/rauc-hawkbit-updater/rootCA.crt /etc/rauc-hawkbit-updater/signingIntermediateCA.crt");
+	msg = g_strdup_printf("openssl verify -verbose -CAfile /persist/factory/rauc-hawkbit-updater/rootCA.crt /persist/factory/rauc-hawkbit-updater/signingIntermediateCA.crt");
 
 	fp = popen(msg, "r");
 	
 	fgets(result, sizeof(result), fp);
 	
 	pclose(fp);
-	
-	if (0 != strncmp(result, "/etc/rauc-hawkbit-updater/signingIntermediateCA.crt: OK", strlen("/etc/rauc-hawkbit-updater/signingIntermediateCA.crt: OK"))){
+
+	removeRootCA();
+
+	if (0 != strncmp(result, "/persist/factory/rauc-hawkbit-updater/signingIntermediateCA.crt: OK", strlen("/persist/factory/rauc-hawkbit-updater/signingIntermediateCA.crt: OK"))){
 		fails = get_fail_attempts();
 	
 		if (fails >=2) {
@@ -1169,18 +1171,18 @@ static gpointer download_thread(gpointer data)
 	3. signingCertificate.crt -> code_signing_certificate_public_key.pem
 *//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	msg = g_strdup_printf("openssl x509 -pubkey -noout -in /etc/rauc-hawkbit-updater/signingCertificate.crt > /etc/rauc-hawkbit-updater/code_signing_certificate_public_key.pem");
+	msg = g_strdup_printf("openssl x509 -pubkey -noout -in /persist/factory/rauc-hawkbit-updater/signingCertificate.crt > /persist/factory/rauc-hawkbit-updater/code_signing_certificate_public_key.pem");
 	system(msg);
 
 /*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	4. Check signature
 *//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-		msg = g_strdup_printf("openssl dgst -sha256 -binary -out /etc/rauc-hawkbit-updater/ota.raucb.bin.sha256 %s", hawkbit_config->bundle_download_location);
+		msg = g_strdup_printf("openssl dgst -sha256 -binary -out /persist/factory/rauc-hawkbit-updater/ota.raucb.bin.sha256 %s", hawkbit_config->bundle_download_location);
 		system(msg);
-		msg = g_strdup_printf("base64 --decode /etc/rauc-hawkbit-updater/signed_digest_base64 > /etc/rauc-hawkbit-updater/signature.bin");
+		msg = g_strdup_printf("base64 --decode /persist/factory/rauc-hawkbit-updater/signed_digest_base64 > /persist/factory/rauc-hawkbit-updater/signature.bin");
 		system(msg);
-		msg = g_strdup_printf("openssl dgst -sha256 -verify /etc/rauc-hawkbit-updater/code_signing_certificate_public_key.pem -signature /etc/rauc-hawkbit-updater/signature.bin /etc/rauc-hawkbit-updater/ota.raucb.bin.sha256");
+		msg = g_strdup_printf("openssl dgst -sha256 -verify /persist/factory/rauc-hawkbit-updater/code_signing_certificate_public_key.pem -signature /persist/factory/rauc-hawkbit-updater/signature.bin /persist/factory/rauc-hawkbit-updater/ota.raucb.bin.sha256");
 	
 		fp = popen(msg, "r");
 
@@ -1240,24 +1242,25 @@ static gpointer download_thread(gpointer data)
 		//feedback_progress(artifact->status, "INSTALLING",95, "", "", "", "", NULL, FALSE, "");
 		//feedback_progress(artifact->status, "SUCCESS",   100, "", "", "", "", NULL, TRUE, "SUCCESS");
 
-		//sprintf(buf, "touch /etc/rauc-hawkbit-updater/inprogress");
+		//sprintf(buf, "touch /persist/factory/rauc-hawkbit-updater/inprogress");
 
 		msg = g_strdup_printf("mkdir -p /persist/factory/rauc-hawkbit-updater/");
 		system(msg);
 
 		msg = g_strdup_printf("echo \"%s\n%s\" > /persist/factory/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
-		//sprintf(buf, "echo \"%s\n%s\" > /etc/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
+		//sprintf(buf, "echo \"%s\n%s\" > /persist/factory/rauc-hawkbit-updater/inprogress", artifact->version, artifact->status);
 		system(msg);
 
 		msg = g_strdup_printf("echo \"\" > /data/ota-successed");
 		system(msg);
+
+		recordLastFailedTime("successfully flashed");
 
 		send_wait_for_reboot_message();
 
         g_free(checksum.checksum_result);
         process_artifact_cleanup(artifact);
 		process_deployment_cleanup();
-		recordLastFailedTime("successfully flashed");
 		upgradeState = US_DONE;
         return NULL;
 down_error:
