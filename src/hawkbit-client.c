@@ -97,8 +97,7 @@ static GSourceFunc software_ready_cb;
 //static gchar * volatile action_id = NULL;
 static size_t downloadStart = 0;
 
-
-static const char *rootCAcert = "-----BEGIN CERTIFICATE-----MIID3TCCA4OgAwIBAgIUdvyCrROmznGX0SHgVdI0geUJHqAwCgYIKoZIzj0EAwIwajEfMB0GA1UEAwwWVHltcGhhbnlDb2RlU2lnblJvb3RDQTEeMBwGA1UECwwVUHJvZHVjdCBDeWJlcnNlY3VyaXR5MRowGAYDVQQKDBFSaXZpYW4gQXV0b21vdGl2ZTELMAkGA1UEBhMCVVMwIBcNMjEwNTI1MTk0ODQ1WhgPMjA3MTA1MTMxOTQ4NDRaMGoxHzAdBgNVBAMMFlR5bXBoYW55Q29kZVNpZ25Sb290Q0ExHjAcBgNVBAsMFVByb2R1Y3QgQ3liZXJzZWN1cml0eTEaMBgGA1UECgwRUml2aWFuIEF1dG9tb3RpdmUxCzAJBgNVBAYTAlVTMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVmgrLHJPZ3hb4ws601qH6bVZSTKG8Tq2znRbk/M8VdPNuczpMztr/SBOMN2ObTv1upQUUrHKrWX5eaXA9StZi6OCAgMwggH/MA8GA1UdEwEB/wQFMAMBAf8wHwYDVR0jBBgwFoAU3rf6gqmlPGDOKTVviq9oTvo2rlAwXgYIKwYBBQUHAQEEUjBQME4GCCsGAQUFBzABhkJodHRwOi8vZWpiY2EtcHJvZC5wa2kzcmRwYXJ0eS5nb3Jpdi5jby9lamJjYS9wdWJsaWN3ZWIvc3RhdHVzL29jc3AwggE6BgNVHR8EggExMIIBLTCCASmggbaggbOGgbBodHRwOi8vZWpiY2EtcHJvZC5wa2kzcmRwYXJ0eS5nb3Jpdi5jby9lamJjYS9wdWJsaWN3ZWIvd2ViZGlzdC9jZXJ0ZGlzdD9jbWQ9Y3JsJmlzc3Vlcj1DTiUzRFR5bXBoYW55Q29kZVNpZ25Sb290Q0ElMkNPVSUzRFByb2R1Y3QrQ3liZXJzZWN1cml0eSUyQ08lM0RSaXZpYW4rQXV0b21vdGl2ZSUyQ0MlM0RVU6JupGwwajEfMB0GA1UEAwwWVHltcGhhbnlDb2RlU2lnblJvb3RDQTEeMBwGA1UECwwVUHJvZHVjdCBDeWJlcnNlY3VyaXR5MRowGAYDVQQKDBFSaXZpYW4gQXV0b21vdGl2ZTELMAkGA1UEBhMCVVMwHQYDVR0OBBYEFN63+oKppTxgzik1b4qvaE76Nq5QMA4GA1UdDwEB/wQEAwIBBjAKBggqhkjOPQQDAgNIADBFAiEA8gjYw39FvOfXdPO7XdAVFjH9HTSK5Qw0Haqf5EsrcmECIHcxcmT9DtzN9m2SOReOtv4r7SiTA0Jxm5iuAPmDNkJK-----END CERTIFICATE-----";
+static const char *rootCAcert = "-----BEGIN CERTIFICATE-----\n\rMIICOzCCAeGgAwIBAgIUdo8hZE5NgzUy5XY+qS9aZH3qOCAwCgYIKoZIzj0EAwIw\n\rajEfMB0GA1UEAwwWVHltcGhhbnlDb2RlU2lnblJvb3RDQTEeMBwGA1UECwwVUHJv\n\rZHVjdCBDeWJlcnNlY3VyaXR5MRowGAYDVQQKDBFSaXZpYW4gQXV0b21vdGl2ZTEL\n\rMAkGA1UEBhMCVVMwIBcNMjEwNTI3MjI0NDM5WhgPMjA3MTA1MTUyMjQ0MzhaMGox\n\rHzAdBgNVBAMMFlR5bXBoYW55Q29kZVNpZ25Sb290Q0ExHjAcBgNVBAsMFVByb2R1\n\rY3QgQ3liZXJzZWN1cml0eTEaMBgGA1UECgwRUml2aWFuIEF1dG9tb3RpdmUxCzAJ\n\rBgNVBAYTAlVTMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVmgrLHJPZ3hb4ws6\n\r01qH6bVZSTKG8Tq2znRbk/M8VdPNuczpMztr/SBOMN2ObTv1upQUUrHKrWX5eaXA\n\r9StZi6NjMGEwDwYDVR0TAQH/BAUwAwEB/zAfBgNVHSMEGDAWgBTet/qCqaU8YM4p\n\rNW+Kr2hO+jauUDAdBgNVHQ4EFgQU3rf6gqmlPGDOKTVviq9oTvo2rlAwDgYDVR0P\n\rAQH/BAQDAgEGMAoGCCqGSM49BAMCA0gAMEUCICfsbAb0j1Rdw4eplAWUefQR/Nuc\n\rfT04svna4j9L6fO+AiEAyGxdPhyT0hH+Ix1Q0xPhcGD953dpIfPTqTkzV0HqvrA=\n\r-----END CERTIFICATE-----";
 
 static const char *PpCertFile   = "/persist/factory/rauc-hawkbit-updater/client.crt";
 static const char *PpCACertFile = "/persist/factory/rauc-hawkbit-updater/3rdparty_infra_cert_chain.pem";
@@ -132,7 +131,12 @@ char * lastStrstr(const char * haystack,const char * needle){
     return before;
 }
 
-static gboolean validateSigningIntermediateCAAgainstRootCA() {
+static gboolean removeRootCA() {
+	remove("/persist/factory/rauc-hawkbit-updater/rootCA.crt");
+	return TRUE;
+}
+
+static gboolean createRootCA() {
 	FILE *fp;
 	size_t fsize;
 	char cert[4096];
@@ -140,79 +144,38 @@ static gboolean validateSigningIntermediateCAAgainstRootCA() {
 	const char *d = "-----BEGIN CERTIFICATE-----";
 	char *p;
 
-	fp = fopen("/etc/rauc-hawkbit-updater/signingIntermediateCA.crt", "r");
+	fp = fopen("/etc/rauc-hawkbit-updater/rootCA.crt", "w+");
 	if(fp != NULL) {
-	 	
-		fsize = fread(cert, 1, 4096, fp);
 
-		cert[fsize-1] = 0;
-		g_debug("signingIntermediateCA[%d][%s]", fsize, cert);
-
-		p = strstr(cert, d);
-		//p = lastStrstr(cert, d);
-
-		//g_debug("rootCA in intermediate [%s]", p);
-
-		fclose(fp);
+	   fprintf(fp,"%s",rootCAcert);
+   	   fclose(fp);
 	}
 
-//	fp = fopen(pRootCA, "r");
-//	if(fp != NULL) {
-//	 	
-//		fsize = fread(rootCert, 1, 2048, fp);
-//		g_debug("rootCA in rootCA [%d][%s]", fsize, rootCert);
-//
-//		fclose(fp);
-//	}
+	g_autofree gchar *msg = NULL;
 
-	if (NULL == p)
-	{
-		g_debug("validateSigningIntermediateCAAgainstRootCA: cannot extract rootCA from signingIntermediateCA.crt");
-#ifdef SKIP_ROOT_CA_VERIFICATION
-		return TRUE;
-#else
-		return FALSE;
-#endif
-
-	}
-
-	//if (0 == strcmp(p, rootCert)){
-	//if (0 == strcmp(p, rootCAcert)){
-	if (0 == memcmp(p, rootCAcert, sizeof(rootCAcert))){
-		g_debug("validateSigningIntermediateCAAgainstRootCA: same");
-		return TRUE;
-	} else{
-	 	g_debug("validateSigningIntermediateCAAgainstRootCA: not same");
-#ifdef SKIP_ROOT_CA_VERIFICATION
-		return TRUE;
-#else
-		return FALSE;
-#endif
-	}
+	msg = g_strdup_printf("dos2unix /etc/rauc-hawkbit-updater/rootCA.crt");
+	system(msg);
 }
+
 static gboolean check_keys_certs()
 {
 	if ((access(PpCertFile, 0)   == 0) 
 	&&  (access(PpCACertFile, 0) == 0) 
-	&&  (access(PpKeyName, 0)    == 0)
-	&&  (access(PpRootCA, 0)     == 0))
+	&&  (access(PpKeyName, 0)    == 0))
 	{
 		pCertFile   = PpCertFile;
 		pCACertFile = PpCACertFile;
 		pKeyName    = PpKeyName;
-		pRootCA     = PpRootCA;
 		g_debug("All necessary certs and keys are present in persist");
 		return TRUE;
 	} 
 	else if ((access(FpCertFile, 0)   == 0) 
 	&&       (access(FpCACertFile, 0) == 0) 
-	&&       (access(FpKeyName, 0)    == 0)
-	&&       (access(FpRootCA, 0)     == 0))
+	&&       (access(FpKeyName, 0)    == 0))
 	{
 		pCertFile   = FpCertFile;
 		pCACertFile = FpCACertFile;
 		pKeyName    = FpKeyName;
-		pRootCA     = FpRootCA;
 		g_debug("All necessary certs and keys are present in file system");
 		return TRUE;
 	}
@@ -1136,7 +1099,7 @@ static gpointer download_thread(gpointer data)
 		msg = g_strdup_printf("openssl verify -partial_chain -verbose -CAfile /etc/rauc-hawkbit-updater/signingIntermediateCA.crt /etc/rauc-hawkbit-updater/signingCertificate.crt");
 
 		FILE *fp;
-		char result[1035];
+		char result[1024];
 		
 		fp = popen(msg, "r");
 
@@ -1170,8 +1133,17 @@ static gpointer download_thread(gpointer data)
 	2. Verify rootCA included in signingIntermediateCA (it is the first cert in the chain (at the top)) against rootCA pinned in firmware. This is just a string comparison.
 *//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	if (!validateSigningIntermediateCAAgainstRootCA()) {
+	createRootCA();
 
+	msg = g_strdup_printf("openssl verify -verbose -CAfile /etc/rauc-hawkbit-updater/rootCA.crt /etc/rauc-hawkbit-updater/signingIntermediateCA.crt");
+
+	fp = popen(msg, "r");
+	
+	fgets(result, sizeof(result), fp);
+	
+	pclose(fp);
+	
+	if (0 != strncmp(result, "/etc/rauc-hawkbit-updater/signingIntermediateCA.crt: OK", strlen("/etc/rauc-hawkbit-updater/signingIntermediateCA.crt: OK"))){
 		fails = get_fail_attempts();
 	
 		if (fails >=2) {
