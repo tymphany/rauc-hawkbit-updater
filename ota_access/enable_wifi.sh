@@ -1,1 +1,0 @@
-adk-message-send 'connectivity_wifi_enable {}'
