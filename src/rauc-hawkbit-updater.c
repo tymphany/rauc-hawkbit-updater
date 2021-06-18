@@ -163,7 +163,7 @@ int main(int argc, char **argv)
 
 		if (opt_forced){
 			g_autofree gchar *msg = NULL;
-			msg = g_strdup_printf("rm /persist/factory/rauc-hawkbit-updater/*");
+			msg = g_strdup_printf("rm /persist/rauc-hawkbit-updater/temp/*");
 			system(msg);
 		}
 
