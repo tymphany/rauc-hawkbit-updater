@@ -46,6 +46,7 @@
 #include <libgen.h>
 #include <bits/types/struct_tm.h>
 #include <gio/gio.h>
+#include <syslog.h>
 
 #include "config-file.h"
 #include "json-helper.h"
@@ -164,7 +165,7 @@ static gboolean check_keys_certs()
 		pCertFile   = PpCertFile;
 		pCACertFile = PpCACertFile;
 		pKeyName    = PpKeyName;
-		g_debug("All necessary certs and keys are present in persist");
+		syslog(LOG_NOTICE, "All necessary certs and keys are present in persist");
 		return TRUE;
 	} 
 	else if ((access(FpCertFile, 0)   == 0) 
@@ -174,11 +175,11 @@ static gboolean check_keys_certs()
 		pCertFile   = FpCertFile;
 		pCACertFile = FpCACertFile;
 		pKeyName    = FpKeyName;
-		g_debug("All necessary certs and keys are present in file system");
+		syslog(LOG_NOTICE, "All necessary certs and keys are present in file system");
 		return TRUE;
 	}
 	else {
-		g_debug("Some certs or keys are missing");
+		syslog(LOG_NOTICE, "Some certs or keys are missing");
 		return FALSE;
 	}
 }
@@ -254,13 +255,13 @@ static gboolean if_in_progress()
 
 		fp = fopen("/persist/rauc-hawkbit-updater/temp/attemptStart", "r");
 		if (fp == NULL){
-			g_critical("cannot open now file");
+			syslog(LOG_ERR, "cannot open now file");
 			return FALSE;
 		}
 
 		if ((read = getline(&temp, &len, fp)) != -1) {
 			attemptStart = atoi(temp);
-			g_debug("attemptStart |%d|", attemptStart);
+			syslog(LOG_NOTICE, "attemptStart |%d|", attemptStart);
 		}
 
 		fclose(fp);
@@ -268,16 +269,16 @@ static gboolean if_in_progress()
 		now = get_time();
 
 		if ((now - attemptStart) > APPARENTLY_CRASHED_LAST_ATTEMPT) {
-			g_debug("Previous attempt apparently hanged");
+			syslog(LOG_NOTICE, "Previous attempt apparently hanged");
 			return FALSE;
 		}
 		else {
-			g_debug("Previous attempt is in progress, seconds past (%d)", (now - attemptStart));
+			syslog(LOG_NOTICE, "Previous attempt is in progress, seconds past (%d)", (now - attemptStart));
 			return TRUE;
 		}
 	}
 
-	g_debug("Previous attempt is not in progress");
+	syslog(LOG_NOTICE, "Previous attempt is not in progress");
 	return FALSE;
 }
 
@@ -293,38 +294,38 @@ static gboolean if_already_time()
 
 	if( access("/persist/rauc-hawkbit-updater/temp/lastCheck", 0 ) == 0 ) {
 
-		g_debug("We have ota check history");
+		syslog(LOG_NOTICE, "We have ota check history");
 
 		fp = fopen("/persist/rauc-hawkbit-updater/temp/lastCheck", "r");
 		if (fp == NULL){
-			g_critical("Cannot open ota last check even though it exists");
+			syslog(LOG_ERR, "Cannot open ota last check even though it exists"); 
 			return TRUE;
 		}
 
 		if ((read = getline(&temp, &len, fp)) != -1) {
 			lastCheck = atoi(temp);
-			g_debug("Last|%d|", lastCheck);
+			syslog(LOG_NOTICE, "Last|%d|", lastCheck);
 		}
 
 		fclose(fp);
 	}
 	else {
-		g_debug("We do not have last check time stamp");
+		syslog(LOG_NOTICE, "We do not have last check time stamp");
 		return TRUE;
 	}
 	
 	now = get_time();
 
-	g_debug("Seconds since last check passed %d", (now - lastCheck));
+	syslog(LOG_NOTICE, "Seconds since last check passed %d", (now - lastCheck));
 
 	if ((now - lastCheck) > MIN_INTERVAL_BETWEEN_CHECKS_SEC)
 	{
-		g_debug("It is time already");
+		syslog(LOG_NOTICE, "It is time already");
 		return TRUE;
 	}
 	else
 	{
-		g_debug("It is not time yet");
+		syslog(LOG_NOTICE, "It is not time yet");
 		return FALSE;
 	}
 
@@ -361,7 +362,7 @@ static void update_current_version()
 
 	string[fsize] = 0;
 
-	g_debug("Current version %s", string);
+	syslog(LOG_NOTICE, "Current version %s", string);
 
 	//return G_SOURCE_CONTINUE;
 
@@ -381,7 +382,7 @@ static size_t set_fail_attempts(size_t attempts)
 	remove("/persist/rauc-hawkbit-updater/temp/fails");
 	msg = g_strdup_printf("echo \"%d\" > /persist/rauc-hawkbit-updater/temp/fails", attempts);
 	system(msg);
-	g_debug("Set fails attemps count to %d", attempts);
+	syslog(LOG_NOTICE, "Set fails attemps count to %d", attempts);
 	return 0;
 }
 
@@ -389,7 +390,7 @@ static size_t get_fail_attempts()
 {
 	if( access("/persist/rauc-hawkbit-updater/temp/fails", 0 ) == 0 ) {
 
-		g_debug("We have fail hystory");
+		syslog(LOG_NOTICE, "We have fail hystory");
 
 		FILE * fp;
 		char * fails = NULL;
@@ -399,16 +400,16 @@ static size_t get_fail_attempts()
 
 		fp = fopen("/persist/rauc-hawkbit-updater/temp/fails", "r");
 		if (fp == NULL){
-			g_critical("Cannot open fails file even though it exists");
+			syslog(LOG_ERR, "Cannot open fails file even though it exists");
 			return failsCount;
 		}
 
 		if ((read = getline(&fails, &len, fp)) != -1) {
 			failsCount = atoi(fails);
-			g_debug("Current fails count |%s|%d|", fails, failsCount);
+			syslog(LOG_NOTICE, "Current fails count |%s|%d|", fails, failsCount);
 		}
 		else {
-			g_critical("Cannot read fails count");
+			syslog(LOG_ERR, "Cannot read fails count");
 			return failsCount;
 		}
 		fclose(fp);
@@ -416,7 +417,7 @@ static size_t get_fail_attempts()
 		return failsCount;
 	}
 	else {
-		g_debug("We do not have fail history");
+		syslog(LOG_NOTICE, "We do not have fail history");
 		return 0;
 	}
 }
@@ -425,7 +426,7 @@ static gboolean if_wait_for_last_step()
 {
 	if( access("/persist/rauc-hawkbit-updater/temp/inprogress", 0 ) == 0 ) {
 
-		g_debug("Update is still in progress");
+		syslog(LOG_NOTICE, "Update is still in progress");
 
 		FILE * fp;
 		char * version = NULL;
@@ -435,17 +436,17 @@ static gboolean if_wait_for_last_step()
 
 		fp = fopen("/persist/rauc-hawkbit-updater/temp/inprogress", "r");
 		if (fp == NULL){
-			g_critical("Cannot open inprogress file even though it exists");
+			syslog(LOG_ERR, "Cannot open inprogress file even though it exists");
 			recordLastFailedTime("Cannot open inprogress file even though it exists");
 			return TRUE;
 		}
 
 		if ((read = getline(&version, &len, fp)) != -1) {
 			//printf("Retrieved line of length %zu:\n", read);
-			g_debug("Current SW version: %s       Inprogress SW version: %s", currentVersion, version);
+			syslog(LOG_NOTICE, "Current SW version: %s       Inprogress SW version: %s", currentVersion, version);
 
 			if (0 == strcmp(version, currentVersion)){
-				g_debug("Update has been finalized, we report to server that it is done");
+				syslog(LOG_NOTICE, "Update has been finalized, we report to server that it is done");
 
 				if ((read = getline(&statusUrl, &len, fp)) != -1) {
 
@@ -464,17 +465,17 @@ static gboolean if_wait_for_last_step()
 					}
 				}
 				else {
-					g_critical("Cannot read statusUrls");
+					syslog(LOG_ERR, "Cannot read statusUrls");
 					recordLastFailedTime("Cannot read statusUrls");
 				}
 			}
 			else {
-				g_debug("Update has not been finilized, pending for reboot as a last step");
+				syslog(LOG_NOTICE, "Update has not been finilized, pending for reboot as a last step");
 				recordLastFailedTime("Update has not been finilized, pending for reboot as a last step");
 			}
 		}
 		else {
-			g_critical("Cannot read expected inprogress sw version");
+			syslog(LOG_ERR, "Cannot read expected inprogress sw version");
 			recordLastFailedTime("Cannot read expected inprogress sw version");
 		}
 		fclose(fp);
@@ -482,7 +483,7 @@ static gboolean if_wait_for_last_step()
 		return TRUE;
 	}
 	else {
-		g_debug("We are not waiting for reboot to finilize previous upgrade");
+		syslog(LOG_NOTICE, "We are not waiting for reboot to finilize previous upgrade");
 		return FALSE;
 	}
 }
@@ -517,7 +518,7 @@ static goffset get_available_space(const char* path, GError **error)
 
 static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct get_binary *data)
 {
-		//g_debug("curl_write_to_file_cb: size:%d, nmemb:%d\n", size, nmemb);
+		//syslog(LOG_NOTICE, "curl_write_to_file_cb: size:%d, nmemb:%d\n", size, nmemb);
 
 		GError *error = NULL;
 
@@ -532,7 +533,7 @@ static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct
 
 		percentage = (double) data->written / data->filesize * 100;
 
-        g_debug("bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
+        syslog(LOG_NOTICE, "bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
 
 		for (int ii = 9; ii >= 0; ii--)
 		{
@@ -652,7 +653,7 @@ static size_t curl_write_cb(void *content, size_t size, size_t nmemb, void *data
 
         p->payload = (gchar *) g_realloc(p->payload, p->size + real_size + 1);
         if (p->payload == NULL) {
-                g_critical("Failed to expand buffer");
+                syslog(LOG_ERR, "Failed to expand buffer");
                 return -1;
         }
 
@@ -684,12 +685,12 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
         if (!curl) return -1;
 
 #ifdef PRINT_REQUESTS
-        g_debug("[%s]: method[%s] url[%s]", __FUNCTION__, HTTPMethod_STRING[method], url);
+        syslog(LOG_NOTICE, "[%s]: method[%s] url[%s]", __FUNCTION__, HTTPMethod_STRING[method], url);
 #endif
         // init response buffer
         fetch_buffer.payload = g_malloc0(DEFAULT_CURL_REQUEST_BUFFER_SIZE);
         if (fetch_buffer.payload == NULL) {
-                g_critical("Failed to expand buffer");
+                syslog(LOG_ERR, "Failed to expand buffer");
                 curl_easy_cleanup(curl);
                 return -1;
         }
@@ -734,7 +735,7 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
                 g_object_unref(generator);
                 curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postdata);
 #ifdef PRINT_REQUESTS
-                g_debug(">>>>>>Request body: %s\n", postdata);
+                syslog(LOG_NOTICE, ">>>>>>Request body: %s\n", postdata);
 #endif
         }
 
@@ -761,7 +762,9 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
 
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
-		//g_debug("res[%d] http_code: %ld  fetch_buffer.size[%d]\n", res, http_code, fetch_buffer.size);
+		syslog(LOG_NOTICE, "REST[%s]Response status code: %d, fetch_buffer.size[%d]", HTTPMethod_STRING[method], http_code, fetch_buffer.size);
+
+		//syslog(LOG_NOTICE, "res[%d] http_code: %ld  fetch_buffer.size[%d]\n", res, http_code, fetch_buffer.size);
 
         if (res == CURLE_OK && http_code == 200) {
                 if (jsonResponseParser && fetch_buffer.size > 0) {
@@ -770,7 +773,7 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
                                 *jsonResponseParser = parser;
                         } else {
                                 g_object_unref(parser);
-                                g_critical("Failed to parse JSON response body. status: %ld\n", http_code);
+                                syslog(LOG_ERR, "Failed to parse JSON response body. status: %ld\n", http_code);
                         }
                 }
         } else if (res == CURLE_OPERATION_TIMEDOUT) {
@@ -789,7 +792,7 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
                             curl_easy_strerror(res));
         }
 
-        //g_debug("Response body: %s\n", fetch_buffer.payload);
+        //syslog(LOG_NOTICE, "Response body: %s\n", fetch_buffer.payload);
 
         g_free(fetch_buffer.payload);
         g_free(postdata);
@@ -859,7 +862,7 @@ static gboolean feedback_progress(const gchar *url, const gchar *state, gint pro
         json_build_status(builder, state, progress, value1_name, value1, value2_name, value2, finalResult);
 
         int status = rest_request(PUT, url, builder, NULL, error, TRUE);
-        //g_debug("feedback_progress: %d, URL: %s", status, url);
+        //syslog(LOG_NOTICE, "feedback_progress: %d, URL: %s", status, url);
         g_object_unref(builder);
         return (status == 200);
 }
@@ -882,7 +885,7 @@ static long json_get_version(JsonNode *root)
                 temp = strtok(NULL, ".");
                 v3 = atoi(temp);
 
-            //    g_debug("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: %d.%d.%d", v1, v2, v3);
+            //    syslog(LOG_NOTICE, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: %d.%d.%d", v1, v2, v3);
 
                 return v1*10000+v2*100+v3;
         }
@@ -898,7 +901,7 @@ static long json_get_sleeptime(JsonNode *root)
                 struct tm time;
                 strptime(sleeptime_str, "%T", &time);
                 long poll_sleep_time = (time.tm_sec + (time.tm_min * 60) + (time.tm_hour * 60 * 60));
-                //g_debug("sleep time: %s %ld\n", sleeptime_str, poll_sleep_time);
+                //syslog(LOG_NOTICE, "sleep time: %s %ld\n", sleeptime_str, poll_sleep_time);
                 g_free(sleeptime_str);
                 return poll_sleep_time;
         }
@@ -971,7 +974,7 @@ static void process_deployment_cleanup()
 #ifdef REMOVE_BUNLDE_AFTER_OTA
     if (g_file_test(hawkbit_config->bundle_download_location, G_FILE_TEST_EXISTS)) {
             if (g_remove(hawkbit_config->bundle_download_location) != 0) {
-                    g_critical("Failed to delete file: %s", hawkbit_config->bundle_download_location);
+                    syslog(LOG_ERR, "Failed to delete file: %s", hawkbit_config->bundle_download_location);
             }
     }
 #endif
@@ -1006,7 +1009,7 @@ static gpointer download_thread(gpointer data)
         struct artifact *artifact = data;
 		gint fails;
 
-		g_debug("Start downloading: %s\n\r", artifact->downloadUrl);
+		syslog(LOG_NOTICE, "Start downloading: %s\n\r", artifact->downloadUrl);
 
         // setup checksum
         struct get_binary_checksum checksum = { .checksum_result = NULL, .checksum_type = G_CHECKSUM_SHA256 };
@@ -1028,19 +1031,19 @@ static gpointer download_thread(gpointer data)
         if (!res) {
                 msg = g_strdup_printf("Download failed: %s Status: %d", error->message, status);
                 g_clear_error(&error);
-                g_critical("%s", msg);
+                syslog(LOG_ERR, "%s", msg);
                 feedback_progress(artifact->status, "SILENT_FAILURE", 6, "Failure details", msg, "", "", error, "");
 				recordLastFailedTime("download fail");
                 goto down_error;
         }
 
-		g_debug("Binary downloading res[%s]",(res) ? "SUCCESS" : "FAIL");
+		syslog(LOG_NOTICE, "Binary downloading res[%s]",(res) ? "SUCCESS" : "FAIL");
 
         // notify hawkbit that download is complete
         msg = g_strdup_printf("Download complete %.2f MB/s",
                               (artifact->size / ((double)(end_time - start_time) / 1000000)) / (1024 * 1024));
 
-        g_debug("%s", msg);
+        syslog(LOG_NOTICE, "%s", msg);
 
 		feedback_progress(artifact->status, "DOWNLOADED", 75, "Details", "File was fully downloaded", "", "", error, "");
 
@@ -1068,14 +1071,14 @@ static gpointer download_thread(gpointer data)
 				set_fail_attempts(fails+1);
 				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "More details", msgDetails, error, "");
 			}
-            g_critical("%s", msg);
+            syslog(LOG_ERR, "%s", msg);
 			recordLastFailedTime("CRC fail");
             goto down_error;
         }
 #endif
 
 		msg = g_strdup_printf("Checksum check passed");
-		g_debug("%s",msg);
+		syslog(LOG_NOTICE, "%s",msg);
 
 		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", msg, "", "", error, "");
 
@@ -1117,13 +1120,13 @@ static gpointer download_thread(gpointer data)
 				set_fail_attempts(fails+1);
 				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Certificate", artifact->signingCertificate, error, "");
 			}
-			g_critical("%s", msg);
+			syslog(LOG_ERR, "%s", msg);
 			recordLastFailedTime("Validating the authenticity of signingCertificate against signingIntermediateCA failed");
 			goto down_error;
 		}
 
 		msg = g_strdup_printf("Validating the authenticity of signingCertificate against signingIntermediateCA SUCCESS");
-		g_debug("%s",msg);
+		syslog(LOG_NOTICE, "%s",msg);
 
 		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", msg, "", "", error, "");
 
@@ -1155,13 +1158,13 @@ static gpointer download_thread(gpointer data)
 			set_fail_attempts(fails+1);
 			feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Intermediate Certificate", artifact->signingIntermediateCA, error, "");
 		}
-		g_critical("%s", msg);
+		syslog(LOG_ERR, "%s", msg);
 		recordLastFailedTime("Verify rootCA included in signingIntermediateCA failed");
 		goto down_error;
 	}
 	
 	msg = g_strdup_printf("Validating the authenticity of signingIntermediateCA against rootCA SUCCESS");
-	g_debug("%s",msg);
+	syslog(LOG_NOTICE, "%s",msg);
 	
 	feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", msg, "", "", error, "");
 
@@ -1201,19 +1204,19 @@ static gpointer download_thread(gpointer data)
 				set_fail_attempts(fails+1);
 				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Digital Signature", artifact->signedDigest, error, "");
 			}
-			g_critical("%s", msg);
+			syslog(LOG_ERR, "%s", msg);
 			recordLastFailedTime("Digital signature verification failed");
             goto down_error;
 		}
 
-		g_debug("Digital signature check SUCCESS");
+		syslog(LOG_NOTICE, "Digital signature check SUCCESS");
 
 		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 84, "Details", "Digital signature verification passed", "", "", error, "");
 		feedback_progress(artifact->status, "INSTALLING",85, "Details", "Memory bank flashing start", "", "", error, "");
 
 		msg = g_strdup_printf("/etc/factory-test/r1/updateOTA.sh ota.raucb", artifact->signedDigest);
 
-		g_debug("Recovery Started");
+		syslog(LOG_NOTICE, "Recovery Started");
 
 		fp = popen(msg, "r");
 
@@ -1221,11 +1224,11 @@ static gpointer download_thread(gpointer data)
 
 		pclose(fp);
 
-		g_debug("Recovery Done");
+		syslog(LOG_NOTICE, "Recovery Done");
 
 		if (0 != strncmp(result, "OTA success", strlen("OTA success"))) {
 			feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", "Flashing memory bank failed", "", "", error, "");
-            g_critical("%s", msg);
+            syslog(LOG_ERR, "%s", msg);
             status = -4;
 			recordLastFailedTime("Recovery failed");
             goto down_error;
@@ -1303,25 +1306,22 @@ static gboolean process_deployment(JsonNode *req_root, GError **error)
                 goto proc_error;
         }
 
-//        g_debug("New software ready for download. (Name: %s, Version: %s, Size: %" G_GINT64_FORMAT ", URL: %s)\n\r", artifact->name, artifact->version, artifact->size, artifact->downloadUrl);
-//        g_autofree gchar *msg = g_strdup_printf("New software ready for download. (Name: %s, Version: %s, Size: %" G_GINT64_FORMAT ", URL: %s)", artifact->name, artifact->version, artifact->size, artifact->downloadUrl);
 		g_autofree gchar *msg = g_strdup_printf("New software ready for download. (Name: %s, Version: %s, Size: %d)", artifact->name, artifact->version, artifact->size);
 
-		g_debug("%s", msg);
-//		g_debug(msg);
+		syslog(LOG_NOTICE, "%s", msg);
 
 		feedback_progress(artifact->status, "NOT_STARTED", 0, "Info", msg, "Download URL", artifact->downloadUrl, ierror, "");
 
         // Check if there is enough free diskspace
         long freespace = get_available_space(hawkbit_config->bundle_download_location, &ierror);
 
-		g_debug("[%s]: freespace available = %d", __FUNCTION__, freespace);
+		syslog(LOG_NOTICE, "[%s]: freespace available = %d", __FUNCTION__, freespace);
 
         if ((freespace == -1) || (freespace < artifact->size)) {
                 g_autofree gchar *msg = g_strdup_printf("Not enough free space. File size: %" G_GINT64_FORMAT  ". Free space: %ld", artifact->size, freespace);
 				g_propagate_error(error, ierror);
 				feedback_progress(artifact->status, "SILENT_FAILURE", 0, "Failure details", msg, "", "", NULL, "");
-				g_critical("%s", msg);
+				syslog(LOG_ERR, "%s", msg);
                 g_set_error(error, 1, 23, "%s", msg);
                 goto proc_error;
         }
@@ -1359,11 +1359,11 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 
 		switch(upgradeState){
 			case US_INIT:
-				g_debug("upgrade in init");
+				syslog(LOG_NOTICE, "upgrade in init");
 				break;
 			case US_DOWNLOAD:
 				if ((get_time() - downloadStart) > WAIT_DOWNLOAD_FINISH_MAX_TIME){
-					g_debug("upgrade done due to timeout");
+					syslog(LOG_NOTICE, "upgrade done due to timeout");
 					attempt_done();
 					recordLastFailedTime("timeout ");
 		            data->res = 0;
@@ -1371,14 +1371,14 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 		            return G_SOURCE_REMOVE;					
 				}
 				else {
-					g_debug("upgrade in progress");
+					syslog(LOG_NOTICE, "upgrade in progress");
 					return G_SOURCE_CONTINUE;
 				}
 				break;
 			case US_DONE:
-				g_debug("upgrade is done");
+				syslog(LOG_NOTICE, "upgrade is done");
 				attempt_done();
-	            data->res = 0;
+	            data->res = 0;				
 	            g_main_loop_quit(data->loop);
 	            return G_SOURCE_REMOVE;
 				break;
@@ -1393,17 +1393,17 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
         GError *error = NULL;
         JsonParser *json_response_parser = NULL;
 
-//		g_debug("Checking for new software...get_tasks_url[%s]",get_tasks_url);
+//		syslog(LOG_NOTICE, "Checking for new software...get_tasks_url[%s]",get_tasks_url);
 
 	//	g_autofree gchar get_tasks_url_new[200];
 	//	strcpy(get_tasks_url_new, "-v --cacert 3rdparty_infra_cert_chain.pem --cert client.crt --key client.key  https://172.16.69.103/v1/campaigns/speaker/deployment");
-	//	g_debug("Checking for new software...get_tasks_url[%s]",get_tasks_url_new);
+	//	syslog(LOG_NOTICE, "Checking for new software...get_tasks_url[%s]",get_tasks_url_new);
 
 		size_t fails;
 
 		fails = get_fail_attempts();
 
-		g_debug("So far fails count[%d]",fails);
+		syslog(LOG_NOTICE, "So far fails count[%d]",fails);
 
 ///////////////////////////////////////////////
 		update_current_version();
@@ -1438,24 +1438,24 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 
 		attempt_start();
 
-		g_debug("Checking for new software...get_tasks_url[%s]",get_tasks_url);
+		syslog(LOG_NOTICE, "Checking for new software...get_tasks_url[%s]",get_tasks_url);
 
 		int status = rest_request(GET, get_tasks_url, NULL, &json_response_parser, &error, FALSE);
 
         if (status == 200) {
-			g_debug("Response status code: %d", status);
+			syslog(LOG_NOTICE, "Response status code: %d", status);
 			recordLastCheckTime();
 
             if (json_response_parser) {
                 // json_root is owned by the JsonParser and should never be modified or freed.
                 JsonNode *json_root = json_parser_get_root(json_response_parser);
                 g_autofree gchar *str = json_to_string(json_root, TRUE);
-                g_debug("Deployment response: %s\n", str);
+                syslog(LOG_NOTICE, "Deployment response: %s\n", str);
 
                 // get hawkbit sleep time (how often should we check for new software)
                 //hawkbit_interval_check_sec = json_get_sleeptime(json_root);
                 //long version = json_get_version(json_root);
-                //g_debug("version = %d", version);
+                //syslog(LOG_NOTICE, "version = %d", version);
 
 				upgradeState = US_DOWNLOAD;
 				downloadStart = get_time();
@@ -1468,19 +1468,19 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 			}
 
             if (error) {
-                    g_debug("process_deployment Error: %s", error->message);
+                    syslog(LOG_NOTICE, "process_deployment Error: %s", error->message);
             }
         }else if (status == 204) { // successfully connected back-end, no update needed.
-            g_debug("Response status code: %d", status);
+            syslog(LOG_NOTICE, "Response status code: %d", status);
 			recordLastCheckTime();
             if (error) {
-                g_debug("HTTP Error: %s", error->message);
+                syslog(LOG_NOTICE, "HTTP Error: %s", error->message);
             }
 			recordLastFailedTime("successful check, no update needed ");
 			upgradeState = US_DONE;
 
         } else { // could not successfully connect to back-end, need to try again.
-			g_debug("Response status code: %d", status);
+			syslog(LOG_NOTICE, "Response status code: %d", status);
 			recordLastFailedTime("Could not connect to backend");
         	upgradeState = US_DONE;
         }
@@ -1498,6 +1498,8 @@ int hawkbit_start_service_sync()
 
         ctx = g_main_context_new();
         cdata.loop = g_main_loop_new(ctx, FALSE);
+		
+		openlog ("rauc", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_LOCAL1);
 
         timeout_source = g_timeout_source_new(1000);   // pull every second
         g_source_set_name(timeout_source, "Add timeout");
