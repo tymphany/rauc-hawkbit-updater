@@ -59,6 +59,7 @@
 
 #include "hawkbit-client.h"
 
+#define MAX_RETRY_ON_ZERO_RESPONSE (3)
 #define FILE_DOWNLOAD_CHECKPOINTS_NUM         (10)
 #define FILE_DOWNLOAD_DONE_ALL_IN_ALL_PERCENT (75)
 #define FILE_DOWNLOAD_CHECKPOINTS_PERCENT_STEP           (100 / FILE_DOWNLOAD_CHECKPOINTS_NUM)
@@ -433,6 +434,7 @@ static gboolean if_wait_for_last_step()
 		char * statusUrl = NULL;
 		size_t len = 0;
 		ssize_t read;
+		int retry = 0;
 
 		fp = fopen("/persist/rauc-hawkbit-updater/temp/inprogress", "r");
 		if (fp == NULL){
@@ -453,15 +455,17 @@ static gboolean if_wait_for_last_step()
 					//printf("Retrieved line of length %zu:\n", read);
 					statusUrl[strlen(statusUrl)-1] = '\0';
 
-					if (TRUE == feedback_progress(statusUrl, "SUCCESS",   100, "", "", "", "", NULL, "SUCCESS"))
-					{
+					while ((++retry <= MAX_RETRY_ON_ZERO_RESPONSE) && (FALSE == feedback_progress(statusUrl, "SUCCESS",   100, "", "", "", "", NULL, "SUCCESS"))){
+						sleep(1);
+					}
+
+					if (retry > MAX_RETRY_ON_ZERO_RESPONSE)	{
+						recordLastFailedTime("Cannot report last step to backend");
+					}
+					else {
 						remove("/persist/rauc-hawkbit-updater/temp/inprogress");
 						recordLastFailedTime("Last step is done, and reported to backend");
 						send_ota_fully_done_message();
-					}
-					else
-					{
-						recordLastFailedTime("Cannot report last step to backend");
 					}
 				}
 				else {
@@ -535,12 +539,13 @@ static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct
 
         syslog(LOG_NOTICE, "bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
 
-		for (int ii = 9; ii >= 0; ii--)
+		for (int ii = (FILE_DOWNLOAD_CHECKPOINTS_NUM-1); ii >= 0; ii--)
 		{
 			if (!checkPoints[ii] && (percentage > (ii+1) * FILE_DOWNLOAD_CHECKPOINTS_PERCENT_STEP))
 			{
 				checkPoints[ii] = TRUE;
 
+				//syslog(LOG_NOTICE, "bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
 				//char buf[100];
 				//sprintf(buf, "Bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
 
@@ -762,8 +767,12 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
 
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
-		syslog(LOG_NOTICE, "REST[%s]Response status code: %d, fetch_buffer.size[%d]", HTTPMethod_STRING[method], http_code, fetch_buffer.size);
-
+		static int countMe;
+		if (0 == http_code) {
+			syslog(LOG_NOTICE, ">>>>>>>>[%d]ZERO_RESPONSE_REST[%s]Response status code: %d, fetch_buffer.size[%d]", ++countMe, HTTPMethod_STRING[method], http_code, fetch_buffer.size);
+		} else {
+			syslog(LOG_NOTICE, ">>>>>>>>REST[%s]Response status code: %d, fetch_buffer.size[%d]", HTTPMethod_STRING[method], http_code, fetch_buffer.size);
+		}
 		//syslog(LOG_NOTICE, "res[%d] http_code: %ld  fetch_buffer.size[%d]\n", res, http_code, fetch_buffer.size);
 
         if (res == CURLE_OK && http_code == 200) {
@@ -1356,14 +1365,15 @@ typedef struct ClientData_ {
 static gboolean hawkbit_pull_cb(gpointer user_data)
 {
         ClientData *data = user_data;
+		static int zero_response_retry; 
 
 		switch(upgradeState){
 			case US_INIT:
-				syslog(LOG_NOTICE, "upgrade in init");
+				syslog(LOG_NOTICE, "OTA in init");
 				break;
 			case US_DOWNLOAD:
 				if ((get_time() - downloadStart) > WAIT_DOWNLOAD_FINISH_MAX_TIME){
-					syslog(LOG_NOTICE, "upgrade done due to timeout");
+					syslog(LOG_NOTICE, "OTA done due to timeout");
 					attempt_done();
 					recordLastFailedTime("timeout ");
 		            data->res = 0;
@@ -1371,12 +1381,12 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 		            return G_SOURCE_REMOVE;					
 				}
 				else {
-					syslog(LOG_NOTICE, "upgrade in progress");
+					syslog(LOG_NOTICE, "OTA in progress for [%d] sec", (get_time() - downloadStart));
 					return G_SOURCE_CONTINUE;
 				}
 				break;
 			case US_DONE:
-				syslog(LOG_NOTICE, "upgrade is done");
+				syslog(LOG_NOTICE, "OTA is done");
 				attempt_done();
 	            data->res = 0;				
 	            g_main_loop_quit(data->loop);
@@ -1442,7 +1452,7 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 
 		int status = rest_request(GET, get_tasks_url, NULL, &json_response_parser, &error, FALSE);
 
-        if (status == 200) {
+        if (200 == status) {
 			syslog(LOG_NOTICE, "Response status code: %d", status);
 			recordLastCheckTime();
 
@@ -1470,7 +1480,7 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
             if (error) {
                     syslog(LOG_NOTICE, "process_deployment Error: %s", error->message);
             }
-        }else if (status == 204) { // successfully connected back-end, no update needed.
+        }else if (204 == status) { // successfully connected back-end, no update needed.
             syslog(LOG_NOTICE, "Response status code: %d", status);
 			recordLastCheckTime();
             if (error) {
@@ -1479,6 +1489,15 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 			recordLastFailedTime("successful check, no update needed ");
 			upgradeState = US_DONE;
 
+        } else if (0 == status) {
+            syslog(LOG_NOTICE, "Response status code: %d", status);
+            if (error) {
+                syslog(LOG_NOTICE, "HTTP Error: %s", error->message);
+            }
+			if (++zero_response_retry >= MAX_RETRY_ON_ZERO_RESPONSE) {
+				recordLastFailedTime("Could not connect to backend");
+	        	upgradeState = US_DONE;
+			}
         } else { // could not successfully connect to back-end, need to try again.
 			syslog(LOG_NOTICE, "Response status code: %d", status);
 			recordLastFailedTime("Could not connect to backend");
@@ -1501,7 +1520,7 @@ int hawkbit_start_service_sync()
 		
 		openlog ("rauc", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_LOCAL1);
 
-        timeout_source = g_timeout_source_new(1000);   // pull every second
+        timeout_source = g_timeout_source_new(5000);   // pull every second
         g_source_set_name(timeout_source, "Add timeout");
         g_source_set_callback(timeout_source, (GSourceFunc) hawkbit_pull_cb, &cdata, NULL);
         g_source_attach(timeout_source, ctx);
