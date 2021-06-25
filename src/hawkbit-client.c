@@ -456,15 +456,18 @@ static gboolean if_wait_for_last_step()
 					statusUrl[strlen(statusUrl)-1] = '\0';
 
 					while ((++retry <= MAX_RETRY_ON_ZERO_RESPONSE) && (FALSE == feedback_progress(statusUrl, "SUCCESS",   100, "", "", "", "", NULL, "SUCCESS"))){
-						sleep(1);
+						syslog(LOG_ERR, "Could not reach back end[%d], try again in 6 seconds", retry);
+						sleep(6);
 					}
 
 					if (retry > MAX_RETRY_ON_ZERO_RESPONSE)	{
 						recordLastFailedTime("Cannot report last step to backend");
+						syslog(LOG_ERR, "Try limit reached");
 					}
 					else {
 						remove("/persist/rauc-hawkbit-updater/temp/inprogress");
 						recordLastFailedTime("Last step is done, and reported to backend");
+						syslog(LOG_ERR, "Successfully reported final step to back-end");
 						send_ota_fully_done_message();
 					}
 				}
@@ -1446,14 +1449,13 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 			return G_SOURCE_REMOVE;	
 		}
 
-		attempt_start();
-
 		syslog(LOG_NOTICE, "Checking for new software...get_tasks_url[%s]",get_tasks_url);
 
 		int status = rest_request(GET, get_tasks_url, NULL, &json_response_parser, &error, FALSE);
 
         if (200 == status) {
 			syslog(LOG_NOTICE, "Response status code: %d", status);
+			attempt_start();
 			recordLastCheckTime();
 
             if (json_response_parser) {
@@ -1520,7 +1522,7 @@ int hawkbit_start_service_sync()
 		
 		openlog ("rauc", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_LOCAL1);
 
-        timeout_source = g_timeout_source_new(5000);   // pull every second
+        timeout_source = g_timeout_source_new(6000);   // pull every second
         g_source_set_name(timeout_source, "Add timeout");
         g_source_set_callback(timeout_source, (GSourceFunc) hawkbit_pull_cb, &cdata, NULL);
         g_source_attach(timeout_source, ctx);
