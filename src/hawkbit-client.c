@@ -540,7 +540,7 @@ static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct
 
 		percentage = (double) data->written / data->filesize * 100;
 
-        syslog(LOG_NOTICE, "bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
+        //syslog(LOG_NOTICE, "bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
 
 		for (int ii = (FILE_DOWNLOAD_CHECKPOINTS_NUM-1); ii >= 0; ii--)
 		{
@@ -548,7 +548,7 @@ static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct
 			{
 				checkPoints[ii] = TRUE;
 
-				//syslog(LOG_NOTICE, "bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
+				syslog(LOG_NOTICE, "bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
 				//char buf[100];
 				//sprintf(buf, "Bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
 
@@ -630,8 +630,12 @@ static gboolean get_binary(const gchar* download_url, const gchar* file, gint64 
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 */
         CURLcode res = curl_easy_perform(curl);
+
         if (http_code)
                 curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
+
+		syslog(LOG_NOTICE, ">>>>>>>>Get Binary Response status code: %d, result[%d]", &http_code, res);
+
         if (res == CURLE_OK) {
                 if (gb.checksum) { // if checksum enabled then return the value
                         checksum->checksum_result = g_strdup(g_checksum_get_string(gb.checksum));
