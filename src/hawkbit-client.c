@@ -794,14 +794,14 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
                 g_set_error(error,
                             1,                    // error domain
                             http_code,
-                            "HTTP request timed out: %s",
-                            curl_easy_strerror(res));
+                            "HTTP request timed out: %s (%d)",
+                            curl_easy_strerror(res), res);
         } else {
                 g_set_error(error,
                             1,                    // error domain
                             http_code,
-                            "HTTP request failed: %s",
-                            curl_easy_strerror(res));
+                            "HTTP request failed: %s (%d)",
+                            curl_easy_strerror(res), res);
         }
 
         //syslog(LOG_NOTICE, "Response body: %s\n", fetch_buffer.payload);
