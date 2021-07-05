@@ -527,8 +527,6 @@ static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct
 {
 		//syslog(LOG_NOTICE, "curl_write_to_file_cb: size:%d, nmemb:%d\n", size, nmemb);
 
-		GError *error = NULL;
-
         size_t written = fwrite(ptr, size, nmemb, data->fp);
 
         double percentage;
@@ -555,7 +553,7 @@ static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct
 				g_autofree gchar *msg = g_strdup_printf("Bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
 
 				// The downloading is done is 80% of all in all progress
-				feedback_progress(data->status, "DOWNLOADING", (ii + 1) * (FILE_DOWNLOAD_ALL_IN_ALL_PERCENT_PER_CHECKPOINT), "Download details", msg, "", "", error, "");
+				feedback_progress(data->status, "DOWNLOADING", (ii + 1) * (FILE_DOWNLOAD_ALL_IN_ALL_PERCENT_PER_CHECKPOINT), "Download details", msg, "", "", NULL, "");
 				break;
 			}
 		}
@@ -1030,7 +1028,7 @@ static gpointer download_thread(gpointer data)
         // setup checksum
         struct get_binary_checksum checksum = { .checksum_result = NULL, .checksum_type = G_CHECKSUM_SHA256 };
 
-        feedback_progress(artifact->status, "DOWNLOADING", 2, "Info", "About to start downloading", "", "", error, "");
+        feedback_progress(artifact->status, "DOWNLOADING", 2, "Info", "About to start downloading", "", "", NULL, "");
 
         // Download software bundle (artifact)
         gint64 start_time = g_get_monotonic_time();
@@ -1048,7 +1046,7 @@ static gpointer download_thread(gpointer data)
                 msg = g_strdup_printf("Download failed: %s Status: %d", error->message, status);
                 g_clear_error(&error);
                 syslog(LOG_ERR, "%s", msg);
-                feedback_progress(artifact->status, "SILENT_FAILURE", 6, "Failure details", msg, "", "", error, "");
+                feedback_progress(artifact->status, "SILENT_FAILURE", 6, "Failure details", msg, "", "", NULL, "");
 				recordLastFailedTime("download fail");
                 goto down_error;
         }
@@ -1061,9 +1059,9 @@ static gpointer download_thread(gpointer data)
 
         syslog(LOG_NOTICE, "%s", msg);
 
-		feedback_progress(artifact->status, "DOWNLOADED", 75, "Details", "File was fully downloaded", "", "", error, "");
+		feedback_progress(artifact->status, "DOWNLOADED", 75, "Details", "File was fully downloaded", "", "", NULL, "");
 
-		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 80, "Details", "Starting file validating procedure", "", "", error, "");
+		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 80, "Details", "Starting file validating procedure", "", "", NULL, "");
 
 #ifndef SKIP_DOWNLOAD	
         // validate checksum
@@ -1081,11 +1079,11 @@ static gpointer download_thread(gpointer data)
 			if (fails >=2) {
 				msg = g_strdup_printf("CRC check failed and we reached an attempts limit. Stop campaign.");
 				reset_fail_attempts();
-				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "More details", msgDetails, error, "FAIL");
+				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "More details", msgDetails, NULL, "FAIL");
 			} else {
 				msg = g_strdup_printf("CRC check failed but we will try again");
 				set_fail_attempts(fails+1);
-				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "More details", msgDetails, error, "");
+				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "More details", msgDetails, NULL, "");
 			}
             syslog(LOG_ERR, "%s", msg);
 			recordLastFailedTime("CRC fail");
@@ -1096,7 +1094,7 @@ static gpointer download_thread(gpointer data)
 		msg = g_strdup_printf("Checksum check passed");
 		syslog(LOG_NOTICE, "%s",msg);
 
-		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", msg, "", "", error, "");
+		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", msg, "", "", NULL, "");
 
 /*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	0. Save certificates and asignature to file system
@@ -1130,11 +1128,11 @@ static gpointer download_thread(gpointer data)
 			if (fails >=2) {
 				msg = g_strdup_printf("Validating the authenticity of signingCertificate against signingIntermediateCA failed and we have reached an attempts limit. Stop campaign.");
 				reset_fail_attempts();
-				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Certificate", artifact->signingCertificate, error, "FAIL");
+				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Certificate", artifact->signingCertificate, NULL, "FAIL");
 			} else {
 				msg = g_strdup_printf("Validating the authenticity of signingCertificate against signingIntermediateCA failed but we will try again");
 				set_fail_attempts(fails+1);
-				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Certificate", artifact->signingCertificate, error, "");
+				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Certificate", artifact->signingCertificate, NULL, "");
 			}
 			syslog(LOG_ERR, "%s", msg);
 			recordLastFailedTime("Validating the authenticity of signingCertificate against signingIntermediateCA failed");
@@ -1144,7 +1142,7 @@ static gpointer download_thread(gpointer data)
 		msg = g_strdup_printf("Validating the authenticity of signingCertificate against signingIntermediateCA SUCCESS");
 		syslog(LOG_NOTICE, "%s",msg);
 
-		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", msg, "", "", error, "");
+		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", msg, "", "", NULL, "");
 
 /*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	2. Verify rootCA included in signingIntermediateCA (it is the first cert in the chain (at the top)) against rootCA pinned in firmware. This is just a string comparison.
@@ -1168,11 +1166,11 @@ static gpointer download_thread(gpointer data)
 		if (fails >=2) {
 			msg = g_strdup_printf("Validating the authenticity of signingIntermediateCA against rootCA failed and we have reached an attempts limit. Stop campaign.");
 			reset_fail_attempts();
-			feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Intermediate Certificate", artifact->signingIntermediateCA, error, "FAIL");
+			feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Intermediate Certificate", artifact->signingIntermediateCA, NULL, "FAIL");
 		} else {
 			msg = g_strdup_printf("Validating the authenticity of signingIntermediateCA against rootCA failed but we will try again");
 			set_fail_attempts(fails+1);
-			feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Intermediate Certificate", artifact->signingIntermediateCA, error, "");
+			feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Signing Intermediate Certificate", artifact->signingIntermediateCA, NULL, "");
 		}
 		syslog(LOG_ERR, "%s", msg);
 		recordLastFailedTime("Verify rootCA included in signingIntermediateCA failed");
@@ -1182,7 +1180,7 @@ static gpointer download_thread(gpointer data)
 	msg = g_strdup_printf("Validating the authenticity of signingIntermediateCA against rootCA SUCCESS");
 	syslog(LOG_NOTICE, "%s",msg);
 	
-	feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", msg, "", "", error, "");
+	feedback_progress(artifact->status, "VALIDATING_PACKAGE", 83, "Details", msg, "", "", NULL, "");
 
 /*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	3. signingCertificate.crt -> code_signing_certificate_public_key.pem
@@ -1214,11 +1212,11 @@ static gpointer download_thread(gpointer data)
 			if (fails >=2) {
 				msg = g_strdup_printf("Digital signature verification failed and we reached an attempts limit. Stop campaign.");
 				reset_fail_attempts();
-				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Digital Signature", artifact->signedDigest, error, "FAIL");
+				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Digital Signature", artifact->signedDigest, NULL, "FAIL");
 			} else {
 				msg = g_strdup_printf("Digital signature verification failed but we will try again");
 				set_fail_attempts(fails+1);
-				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Digital Signature", artifact->signedDigest, error, "");
+				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", msg, "Digital Signature", artifact->signedDigest, NULL, "");
 			}
 			syslog(LOG_ERR, "%s", msg);
 			recordLastFailedTime("Digital signature verification failed");
@@ -1227,8 +1225,8 @@ static gpointer download_thread(gpointer data)
 
 		syslog(LOG_NOTICE, "Digital signature check SUCCESS");
 
-		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 84, "Details", "Digital signature verification passed", "", "", error, "");
-		feedback_progress(artifact->status, "INSTALLING",85, "Details", "Memory bank flashing start", "", "", error, "");
+		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 84, "Details", "Digital signature verification passed", "", "", NULL, "");
+		feedback_progress(artifact->status, "INSTALLING",85, "Details", "Memory bank flashing start", "", "", NULL, "");
 
 		msg = g_strdup_printf("/etc/factory-test/r1/updateOTA.sh ota.raucb", artifact->signedDigest);
 
@@ -1243,15 +1241,15 @@ static gpointer download_thread(gpointer data)
 		syslog(LOG_NOTICE, "Recovery Done");
 
 		if (0 != strncmp(result, "OTA success", strlen("OTA success"))) {
-			feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", "Flashing memory bank failed", "", "", error, "");
+			feedback_progress(artifact->status, "SILENT_FAILURE", 83, "Failure details", "Flashing memory bank failed", "", "", NULL, "");
             syslog(LOG_ERR, "%s", msg);
             status = -4;
 			recordLastFailedTime("Recovery failed");
             goto down_error;
 		}
 
-		feedback_progress(artifact->status, "INSTALLING",86, "Details", "Memory bank flashing done", "", "", error, "");
-		feedback_progress(artifact->status, "PENDING_REBOOT", 87, "Details", "Now we wait for system reboot", "", "", error, "");
+		feedback_progress(artifact->status, "INSTALLING",86, "Details", "Memory bank flashing done", "", "", NULL, "");
+		feedback_progress(artifact->status, "PENDING_REBOOT", 87, "Details", "Now we wait for system reboot", "", "", NULL, "");
 
 		reset_fail_attempts();
 
@@ -1326,7 +1324,7 @@ static gboolean process_deployment(JsonNode *req_root, GError **error)
 
 		syslog(LOG_NOTICE, "%s", msg);
 
-		feedback_progress(artifact->status, "NOT_STARTED", 0, "Info", msg, "Download URL", artifact->downloadUrl, ierror, "");
+		feedback_progress(artifact->status, "NOT_STARTED", 0, "Info", msg, "Download URL", artifact->downloadUrl, NULL, "");
 
         // Check if there is enough free diskspace
         long freespace = get_available_space(hawkbit_config->bundle_download_location, &ierror);
@@ -1425,6 +1423,13 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 ///////////////////////////////////////////////
 		update_current_version();
 
+		if (FALSE == check_keys_certs()){
+			data->res = 13;
+			recordLastFailedTime("cert Missing ");
+			g_main_loop_quit(data->loop);
+			return G_SOURCE_REMOVE;	
+		}
+
 		if (TRUE == if_wait_for_last_step()){
 			data->res = 10;
 			//recordLastFailedTime("waiting for last step ");
@@ -1444,13 +1449,6 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 			recordLastFailedTime("not time yet ");
 			g_main_loop_quit(data->loop);
 			return G_SOURCE_REMOVE;
-		}
-
-		if (FALSE == check_keys_certs()){
-			data->res = 13;
-			recordLastFailedTime("cert Missing ");
-			g_main_loop_quit(data->loop);
-			return G_SOURCE_REMOVE;	
 		}
 
 		syslog(LOG_NOTICE, "Checking for new software...get_tasks_url[%s]",get_tasks_url);
