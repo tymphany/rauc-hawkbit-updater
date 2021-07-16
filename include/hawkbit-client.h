@@ -86,6 +86,7 @@ struct artifact {
 		gchar* artifact_id;
         gchar* sha256;
         gint64 size;
+		gint64 size_downloaded;
         gchar* name;
         gchar* downloadUrl;
         gchar* filetype;
