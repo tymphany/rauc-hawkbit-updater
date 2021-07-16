@@ -47,6 +47,7 @@
 #include <bits/types/struct_tm.h>
 #include <gio/gio.h>
 #include <syslog.h>
+#include <sys/stat.h>
 
 #include "config-file.h"
 #include "json-helper.h"
@@ -60,7 +61,7 @@
 #include "hawkbit-client.h"
 
 #define MAX_RETRY_ON_ZERO_RESPONSE (3)
-#define FILE_DOWNLOAD_CHECKPOINTS_NUM         (100)
+#define FILE_DOWNLOAD_CHECKPOINTS_NUM         (20)
 #define FILE_DOWNLOAD_DONE_ALL_IN_ALL_PERCENT (75)
 #define FILE_DOWNLOAD_CHECKPOINTS_PERCENT_STEP           (100 / FILE_DOWNLOAD_CHECKPOINTS_NUM)
 #define FILE_DOWNLOAD_ALL_IN_ALL_PERCENT_PER_CHECKPOINT (FILE_DOWNLOAD_DONE_ALL_IN_ALL_PERCENT / FILE_DOWNLOAD_CHECKPOINTS_NUM)
@@ -71,9 +72,7 @@
 #define APPARENTLY_CRASHED_LAST_ATTEMPT (60 * 60 * 2)
 
 //#define PRINT_REQUESTS
-//#define SKIP_DOWNLOAD
 
-#define REMOVE_BUNLDE_AFTER_OTA
 #define REMOVE_TEMP_FILES_AFTER_OTA
 #define REPORT_FINAL_STATE
 
@@ -110,6 +109,14 @@ static const char *FpCertFile   = "/etc/rauc-hawkbit-updater/ota_access/client.c
 static const char *FpCACertFile = "/etc/rauc-hawkbit-updater/ota_access/3rdparty_infra_cert_chain.pem";
 static const char *FpKeyName    = "/etc/rauc-hawkbit-updater/ota_access/client.key";
 
+static const char *ATTEMPT_START = "/persist/rauc-hawkbit-updater/temp/attemptStart";
+static const char *LAST_CHECK    = "/persist/rauc-hawkbit-updater/temp/lastCheck";
+static const char *TEMP_ROOT_CA  = "/persist/rauc-hawkbit-updater/temp/rootCA.crt";
+static const char *LAST_FAILED   = "/persist/rauc-hawkbit-updater/temp/lastFailed";
+static const char *FAILES        = "/persist/rauc-hawkbit-updater/temp/fails";
+static const char *DOWNLOADING   = "/persist/rauc-hawkbit-updater/temp/downloading";
+static const char *INPROGRESS    = "/persist/rauc-hawkbit-updater/temp/inprogress";
+
 static const char *pCertFile;
 static const char *pCACertFile;
 static const char *pKeyName;
@@ -133,7 +140,7 @@ char * lastStrstr(const char * haystack,const char * needle){
 }
 
 static gboolean removeRootCA() {
-	remove("/persist/rauc-hawkbit-updater/temp/rootCA.crt");
+	remove(TEMP_ROOT_CA);
 	return TRUE;
 }
 
@@ -145,7 +152,7 @@ static gboolean createRootCA() {
 	const char *d = "-----BEGIN CERTIFICATE-----";
 	char *p;
 
-	fp = fopen("/persist/rauc-hawkbit-updater/temp/rootCA.crt", "w+");
+	fp = fopen(TEMP_ROOT_CA, "w+");
 	if(fp != NULL) {
 
 	   fprintf(fp,"%s",rootCAcert);
@@ -154,7 +161,7 @@ static gboolean createRootCA() {
 
 	g_autofree gchar *msg = NULL;
 
-	msg = g_strdup_printf("dos2unix /persist/rauc-hawkbit-updater/temp/rootCA.crt");
+	msg = g_strdup_printf("dos2unix %s", TEMP_ROOT_CA);
 	system(msg);
 }
 
@@ -210,10 +217,10 @@ static void recordLastFailedTime(char * message)
 {
 	g_autofree gchar *msg = NULL;
 
-	msg = g_strdup_printf("date > /persist/rauc-hawkbit-updater/temp/lastFailed");
+	msg = g_strdup_printf("date > %s", LAST_FAILED);
 	system(msg);
 
-	msg = g_strdup_printf("echo %s >> /persist/rauc-hawkbit-updater/temp/lastFailed", message);
+	msg = g_strdup_printf("echo %s >> %s", message, LAST_FAILED);
 	system(msg);
 }
 
@@ -221,25 +228,28 @@ static void recordLastCheckTime()
 {
 	g_autofree gchar *msg = NULL;
 
-	msg = g_strdup_printf("echo %d > /persist/rauc-hawkbit-updater/temp/lastCheck", get_time());
+	msg = g_strdup_printf("echo %d > %s", get_time(), LAST_CHECK);
 
 	system(msg);
 }
 
-static gboolean attempt_done()
+static void removeLastCheckTime()
 {
-	remove("/persist/rauc-hawkbit-updater/temp/attemptStart");
-	return TRUE;
+	remove(LAST_CHECK);
 }
 
-static gboolean attempt_start()
+static void attempt_done()
+{
+	remove(ATTEMPT_START);
+}
+
+static void attempt_start()
 {
 	g_autofree gchar *msg = NULL;
 
-	msg = g_strdup_printf("echo %d > /persist/rauc-hawkbit-updater/temp/attemptStart", get_time());
+	msg = g_strdup_printf("echo %d > %s", get_time(), ATTEMPT_START);
 
 	system(msg);
-	return TRUE;
 }
 
 static gboolean if_in_progress()
@@ -253,9 +263,9 @@ static gboolean if_in_progress()
 
 	g_autofree gchar *msg = NULL;
 
-	if( access("/persist/rauc-hawkbit-updater/temp/attemptStart", 0 ) == 0 ) {
+	if( access(ATTEMPT_START, 0 ) == 0 ) {
 
-		fp = fopen("/persist/rauc-hawkbit-updater/temp/attemptStart", "r");
+		fp = fopen(ATTEMPT_START, "r");
 		if (fp == NULL){
 			syslog(LOG_ERR, "cannot open now file");
 			return FALSE;
@@ -294,11 +304,11 @@ static gboolean if_already_time()
 	ssize_t read;
 	g_autofree gchar *msg = NULL;
 
-	if( access("/persist/rauc-hawkbit-updater/temp/lastCheck", 0 ) == 0 ) {
+	if( access(LAST_CHECK, 0 ) == 0 ) {
 
 		syslog(LOG_NOTICE, "We have ota check history");
 
-		fp = fopen("/persist/rauc-hawkbit-updater/temp/lastCheck", "r");
+		fp = fopen(LAST_CHECK, "r");
 		if (fp == NULL){
 			syslog(LOG_ERR, "Cannot open ota last check even though it exists"); 
 			return TRUE;
@@ -374,7 +384,7 @@ static void update_current_version()
 
 static gboolean reset_fail_attempts()
 {
-	remove("/persist/rauc-hawkbit-updater/temp/fails");
+	remove(FAILES);
 	return TRUE;
 }
 
@@ -382,8 +392,8 @@ static size_t set_fail_attempts(size_t attempts)
 {
 	g_autofree gchar *msg;
 
-	remove("/persist/rauc-hawkbit-updater/temp/fails");
-	msg = g_strdup_printf("echo \"%d\" > /persist/rauc-hawkbit-updater/temp/fails", attempts);
+	remove(FAILES);
+	msg = g_strdup_printf("echo \"%d\" > %s", attempts, FAILES);
 	system(msg);
 	syslog(LOG_NOTICE, "Set fails attemps count to %d", attempts);
 	return 0;
@@ -391,7 +401,7 @@ static size_t set_fail_attempts(size_t attempts)
 
 static size_t get_fail_attempts()
 {
-	if( access("/persist/rauc-hawkbit-updater/temp/fails", 0 ) == 0 ) {
+	if( access(FAILES, 0 ) == 0 ) {
 
 		syslog(LOG_NOTICE, "We have fail hystory");
 
@@ -401,7 +411,7 @@ static size_t get_fail_attempts()
 		size_t len = 0;
 		ssize_t read;
 
-		fp = fopen("/persist/rauc-hawkbit-updater/temp/fails", "r");
+		fp = fopen(FAILES, "r");
 		if (fp == NULL){
 			syslog(LOG_ERR, "Cannot open fails file even though it exists");
 			return failsCount;
@@ -425,9 +435,55 @@ static size_t get_fail_attempts()
 	}
 }
 
+static void from_where_to_start_download(struct artifact *artifact)
+{
+	if (( 0 == access(DOWNLOADING, 0 )) && (0 == access(hawkbit_config->bundle_download_location, 0 ))){
+
+		syslog(LOG_NOTICE, "We did download something already");
+
+		FILE * fp;
+		char * version = NULL;
+		char * statusUrl = NULL;
+		size_t len = 0, size = 0;
+		ssize_t read;
+		int retry = 0;
+
+		struct stat st;
+		stat(hawkbit_config->bundle_download_location, &st);
+		size = st.st_size;
+
+		fp = fopen(DOWNLOADING, "r");
+		if (fp == NULL){
+			syslog(LOG_ERR, "Cannot open downloading file even though it exists");
+			return;
+		}
+
+		if ((read = getline(&version, &len, fp)) != -1) {
+
+			version[strlen(version)-1] = '\0';
+			syslog(LOG_NOTICE, "Already did download SW version: [%s], we need [%s]", version, artifact->version);
+
+			if (0 == strcmp(version, artifact->version)){
+				syslog(LOG_NOTICE, "That version is what we need");
+				artifact->size_downloaded = size;
+			}
+			else {
+				syslog(LOG_NOTICE, "That version is not what we need");
+			}
+		}
+		else {
+			syslog(LOG_ERR, "Cannot read downloading file");
+		}
+		fclose(fp);
+	}
+	else {
+		syslog(LOG_NOTICE, "downloading or ota.raucb does not exist");
+	}
+}
+
 static gboolean if_wait_for_last_step()
 {
-	if( access("/persist/rauc-hawkbit-updater/temp/inprogress", 0 ) == 0 ) {
+	if( access(INPROGRESS, 0 ) == 0 ) {
 
 		syslog(LOG_NOTICE, "Update is still in progress");
 
@@ -438,7 +494,7 @@ static gboolean if_wait_for_last_step()
 		ssize_t read;
 		int retry = 0;
 
-		fp = fopen("/persist/rauc-hawkbit-updater/temp/inprogress", "r");
+		fp = fopen(INPROGRESS, "r");
 		if (fp == NULL){
 			syslog(LOG_ERR, "Cannot open inprogress file even though it exists");
 			recordLastFailedTime("Cannot open inprogress file even though it exists");
@@ -447,7 +503,7 @@ static gboolean if_wait_for_last_step()
 
 		if ((read = getline(&version, &len, fp)) != -1) {
 			//printf("Retrieved line of length %zu:\n", read);
-			syslog(LOG_NOTICE, "Current SW version: %s       Inprogress SW version: %s", currentVersion, version);
+			syslog(LOG_NOTICE, "Current SW version: [%s]       Inprogress SW version: [%s]", currentVersion, version);
 
 			if (0 == strcmp(version, currentVersion)){
 				syslog(LOG_NOTICE, "Update has been finalized, we report to server that it is done");
@@ -467,7 +523,7 @@ static gboolean if_wait_for_last_step()
 						syslog(LOG_ERR, "Try limit reached");
 					}
 					else {
-						remove("/persist/rauc-hawkbit-updater/temp/inprogress");
+						remove(INPROGRESS);
 						recordLastFailedTime("Last step is done, and reported to backend");
 						syslog(LOG_ERR, "Successfully reported final step to back-end");
 						send_ota_fully_done_message();
@@ -534,22 +590,21 @@ static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct
         double percentage;
 
         data->written += written;
-        if (data->checksum) {
-                g_checksum_update(data->checksum, ptr, written);
-        }
+//        if (data->checksum) {
+//                g_checksum_update(data->checksum, ptr, written);
+//        }
 
 		percentage = (double) data->written / data->filesize * 100;
 
-        //syslog(LOG_NOTICE, "bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
+        syslog(LOG_NOTICE, "bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
 
 		for (int ii = (FILE_DOWNLOAD_CHECKPOINTS_NUM-1); ii >= 0; ii--)
 		{
-			if (!checkPoints[ii] && (percentage > (ii+1) * FILE_DOWNLOAD_CHECKPOINTS_PERCENT_STEP))
+			if (!checkPoints[ii] && (percentage > (ii+1) * FILE_DOWNLOAD_CHECKPOINTS_PERCENT_STEP) && (percentage < (ii+2) * FILE_DOWNLOAD_CHECKPOINTS_PERCENT_STEP))
 			{
 				checkPoints[ii] = TRUE;
 
-				syslog(LOG_NOTICE, "bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
-				//char buf[100];
+
 				//sprintf(buf, "Bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
 
 				g_autofree gchar *msg = g_strdup_printf("Bytes downloaded: %ld / %ld (%.2f %%)", data->written, data->filesize, (double) percentage);
@@ -574,9 +629,10 @@ static size_t curl_write_to_file_cb(void *ptr, size_t size, size_t nmemb, struct
  * @param[out] http_code      Return location for the http_code, can be NULL
  * @param[out] error          Error
  */
-static gboolean get_binary(const gchar* download_url, const gchar* file, gint64 filesize, struct get_binary_checksum *checksum, glong *http_code, GError **error, gchar* status)
+static gboolean get_binary(const gchar* download_url, const gchar* file, gint64 filesize, gint64 already_downloaded, struct get_binary_checksum *checksum, glong *http_code, GError **error, gchar* status)
 {
-        FILE *fp = fopen(file, "wb");
+        //FILE *fp = fopen(file, "wb");
+        FILE *fp = fopen(file, "a+b");
         if (fp == NULL) {
                 g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
                             "Failed to open file for download: %s", file);
@@ -594,10 +650,31 @@ static gboolean get_binary(const gchar* download_url, const gchar* file, gint64 
         struct get_binary gb = {
                 .fp       = fp,
                 .filesize = filesize,
-                .written  = 0,
+                .written  = already_downloaded,//0,
                 .checksum = (checksum != NULL ? g_checksum_new(checksum->checksum_type) : NULL),
                 .status   = status
         };
+
+		if (0 != already_downloaded) {
+
+			char *buffer;
+			
+			buffer = calloc( 1, already_downloaded );
+			if( !buffer ) {
+				syslog(LOG_NOTICE, ">>>>>>>>Could not allocate buffer[%d]", already_downloaded);
+			}
+			
+			/* copy the file into the buffer */
+			if( 1!=fread( buffer , already_downloaded, 1 , fp) ) {
+			  syslog(LOG_NOTICE, ">>>>>>>>Could not copy to buffer[%d]", already_downloaded);
+			}
+
+			if (gb.checksum) {
+				g_checksum_update(gb.checksum, buffer, already_downloaded);
+			}
+
+			free(buffer);
+		}
 
         curl_easy_setopt(curl, CURLOPT_URL, download_url);
  //       curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
@@ -612,43 +689,47 @@ static gboolean get_binary(const gchar* download_url, const gchar* file, gint64 
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 1L);
 
-   //curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
-        /* abort if slower than 100 bytes/sec during 60 seconds */
-  //      curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 60L);
-  //      curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 100L);
-        // Setup request headers
+		char range_buf[64];
+
+		sprintf(range_buf, "%d-%d", already_downloaded, filesize-1);
+
+		syslog(LOG_NOTICE, "Range %s", range_buf);
+		
+		curl_easy_setopt(curl, CURLOPT_RANGE, range_buf);
+
         struct curl_slist *headers = NULL;
-/*
-        headers = curl_slist_append(headers, "Accept: application/octet-stream");
-        if (hawkbit_config->auth_token) {
-                g_autofree gchar* auth_token = g_strdup_printf("Authorization: TargetToken %s", hawkbit_config->auth_token);
-                headers = curl_slist_append(headers, auth_token);
-        } else if (hawkbit_config->gateway_token) {
-                g_autofree gchar* gateway_token = g_strdup_printf("Authorization: GatewayToken %s", hawkbit_config->gateway_token);
-                headers = curl_slist_append(headers, gateway_token);
-        }
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-*/
-        CURLcode res = curl_easy_perform(curl);
 
-        if (http_code)
-                curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
+		CURLcode res = CURLE_OK;
 
-		syslog(LOG_NOTICE, ">>>>>>>>Get Binary Response status code: %d, result[%d]", &http_code, res);
+		if (already_downloaded == filesize) {
+			if (gb.checksum) { // if checksum enabled then return the value
+				checksum->checksum_result = g_strdup(g_checksum_get_string(gb.checksum));
+				g_checksum_free(gb.checksum);
+			}
+		} else {
+	        res = curl_easy_perform(curl);
 
-        if (res == CURLE_OK) {
-                if (gb.checksum) { // if checksum enabled then return the value
-                        checksum->checksum_result = g_strdup(g_checksum_get_string(gb.checksum));
-                        g_checksum_free(gb.checksum);
-                }
-        } else {
-                g_set_error(error,
-                            G_IO_ERROR,                    // error domain
-                            G_IO_ERROR_FAILED,             // error code
-                            "HTTP request failed: %s",     // error message format string
-                            curl_easy_strerror(res));
-        }
+	        if (http_code)
+	                curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
 
+			syslog(LOG_NOTICE, ">>>>>>>>Get Binary Response status code: %d, result[%d]", &http_code, res);
+
+	        if (res == CURLE_OK) {
+
+		        if (gb.checksum) { // if checksum enabled then return the value
+		                checksum->checksum_result = g_strdup(g_checksum_get_string(gb.checksum));
+		                g_checksum_free(gb.checksum);
+		        } 
+	        }
+			else {
+	                g_set_error(error,
+	                            G_IO_ERROR,                    // error domain
+	                            G_IO_ERROR_FAILED,             // error code
+	                            "HTTP request failed: %s",     // error message format string
+	                            curl_easy_strerror(res));
+	        }
+		}
+ 
         curl_easy_cleanup(curl);
         curl_slist_free_all(headers);
         fclose(fp);
@@ -776,9 +857,9 @@ static gint rest_request(enum HTTPMethod method, const gchar* url, JsonBuilder* 
 
 		static int countMe;
 		if (0 == http_code) {
-			syslog(LOG_NOTICE, ">>>>>>>>[%d]ZERO_RESPONSE_REST[%s]Response status code: %d, fetch_buffer.size[%d]", ++countMe, HTTPMethod_STRING[method], http_code, fetch_buffer.size);
+			syslog(LOG_NOTICE, ">>>>>>>>[%d]ZERO_RESPONSE_REST[%s]Response status code: %d", ++countMe, HTTPMethod_STRING[method], http_code);
 		} else {
-			syslog(LOG_NOTICE, ">>>>>>>>REST[%s]Response status code: %d, fetch_buffer.size[%d]", HTTPMethod_STRING[method], http_code, fetch_buffer.size);
+			syslog(LOG_NOTICE, ">>>>>>>>REST[%s]Response status code: %d", HTTPMethod_STRING[method], http_code);
 		}
 		//syslog(LOG_NOTICE, "res[%d] http_code: %ld  fetch_buffer.size[%d]\n", res, http_code, fetch_buffer.size);
 
@@ -934,7 +1015,7 @@ static gboolean feedback_progress(const gchar *url, const gchar *state, gint pro
         json_build_status(builder, state, progress, value1_name, value1, value2_name, value2, finalResult);
 
         int status = rest_request(PUT, url, builder, NULL, error, TRUE);
-        //syslog(LOG_NOTICE, "feedback_progress: %d, URL: %s", status, url);
+        syslog(LOG_NOTICE, "feedback_progress: %d, URL: %s", status, url);
         g_object_unref(builder);
         return (status == 200);
 }
@@ -1059,13 +1140,13 @@ static void process_artifact_cleanup(struct artifact *artifact)
 
 static void process_deployment_cleanup()
 {
-#ifdef REMOVE_BUNLDE_AFTER_OTA
-    if (g_file_test(hawkbit_config->bundle_download_location, G_FILE_TEST_EXISTS)) {
-            if (g_remove(hawkbit_config->bundle_download_location) != 0) {
-                    syslog(LOG_ERR, "Failed to delete file: %s", hawkbit_config->bundle_download_location);
-            }
-    }
-#endif
+//#ifdef REMOVE_BUNLDE_AFTER_OTA
+//    if (g_file_test(hawkbit_config->bundle_download_location, G_FILE_TEST_EXISTS)) {
+//            if (g_remove(hawkbit_config->bundle_download_location) != 0) {
+//                    syslog(LOG_ERR, "Failed to delete file: %s", hawkbit_config->bundle_download_location);
+//            }
+//    }
+//#endif
 
 #ifdef REMOVE_TEMP_FILES_AFTER_OTA
 		g_autofree gchar *msg = NULL;
@@ -1111,12 +1192,18 @@ static gpointer download_thread(gpointer data)
         gint64 start_time = g_get_monotonic_time();
         gint status = 0;
 
-#ifndef SKIP_DOWNLOAD		
+		from_where_to_start_download(artifact);
+
+		if (0 == artifact->size_downloaded) {
+			remove(hawkbit_config->bundle_download_location);
+		}
+		
+		msg = g_strdup_printf("echo \"%s\" > /persist/rauc-hawkbit-updater/temp/downloading", artifact->version);
+		system(msg);
+
         gboolean res = get_binary(artifact->downloadUrl, hawkbit_config->bundle_download_location,
-                                  artifact->size, &checksum, &status, &error, artifact->status);
-#else
-		gboolean res = TRUE;
-#endif
+                                  artifact->size, artifact->size_downloaded, &checksum, &status, &error, artifact->status);
+
         gint64 end_time = g_get_monotonic_time();
 
         if (!res) {
@@ -1140,7 +1227,6 @@ static gpointer download_thread(gpointer data)
 
 		feedback_progress(artifact->status, "VALIDATING_PACKAGE", 80, "details", "Starting file validating procedure", "", "", NULL, "");
 
-#ifndef SKIP_DOWNLOAD	
         // validate checksum
         if (g_strcmp0(artifact->sha256, checksum.checksum_result)) {
 			g_autofree gchar *msgDetails = NULL;
@@ -1150,6 +1236,7 @@ static gpointer download_thread(gpointer data)
             artifact->name, artifact->version,
             checksum.checksum_result,
             artifact->sha256);
+
 
 			fails = get_fail_attempts();
 
@@ -1162,11 +1249,10 @@ static gpointer download_thread(gpointer data)
 				set_fail_attempts(fails+1);
 				feedback_progress(artifact->status, "SILENT_FAILURE", 83, "failureDetails", msg, "moreDetails", msgDetails, NULL, "");
 			}
-            syslog(LOG_ERR, "%s", msg);
+            syslog(LOG_ERR, "%s, %s", msg, msgDetails);
 			recordLastFailedTime("CRC fail");
             goto down_error;
         }
-#endif
 
 		msg = g_strdup_printf("Checksum check passed");
 		syslog(LOG_NOTICE, "%s",msg);
@@ -1339,7 +1425,7 @@ static gpointer download_thread(gpointer data)
 		msg = g_strdup_printf("mkdir -p /persist/rauc-hawkbit-updater/temp/");
 		system(msg);
 
-		msg = g_strdup_printf("echo \"%s\n%s\" > /persist/rauc-hawkbit-updater/temp/inprogress", artifact->version, artifact->status);
+		msg = g_strdup_printf("echo \"%s\n%s\" > %s", artifact->version, artifact->status, INPROGRESS);
 		//sprintf(buf, "echo \"%s\n%s\" > /persist/rauc-hawkbit-updater/temp/inprogress", artifact->version, artifact->status);
 		system(msg);
 
@@ -1388,6 +1474,7 @@ static gboolean process_deployment(JsonNode *req_root, GError **error)
 		artifact->signingCertificate    = json_get_string(json_artifact, "$.signingCertificate");
 		artifact->signingIntermediateCA = json_get_string(json_artifact, "$.signingIntermediateCA");
 		artifact->version               = json_get_string (req_root,  "$.metadata.version");
+		artifact->size_downloaded       = 0;
 
         if (artifact->downloadUrl == NULL) {
 
@@ -1514,16 +1601,16 @@ static gboolean hawkbit_pull_cb(gpointer user_data)
 			return G_SOURCE_REMOVE;	
 		}
 
-		if (TRUE == if_wait_for_last_step()){
-			data->res = 10;
-			//recordLastFailedTime("waiting for last step ");
+		if (TRUE == if_in_progress()) {
+			data->res = 11;
+			recordLastFailedTime("previous is in progress ");
 			g_main_loop_quit(data->loop);
 			return G_SOURCE_REMOVE;
 		}
 
-		if (TRUE == if_in_progress()) {
-			data->res = 11;
-			recordLastFailedTime("previous is in progress ");
+		if (TRUE == if_wait_for_last_step()){
+			data->res = 10;
+			//recordLastFailedTime("waiting for last step ");
 			g_main_loop_quit(data->loop);
 			return G_SOURCE_REMOVE;
 		}
